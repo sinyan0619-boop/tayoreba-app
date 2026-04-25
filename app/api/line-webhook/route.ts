@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import crypto from 'crypto';
-import Anthropic from '@anthropic-ai/sdk';
 import { createAdminClient } from '@/lib/supabase';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 // ── LINE API ヘルパー ──────────────────────────────────────────
 async function getLineImageBuffer(messageId: string, token: string): Promise<Buffer> {
@@ -38,6 +37,7 @@ interface ExtractedProperty {
 }
 
 async function ocrWithClaude(imageBuffer: Buffer): Promise<ExtractedProperty[]> {
+  const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   const message = await anthropic.messages.create({
@@ -82,6 +82,8 @@ JSONのみ返してください。物件が見つからない場合は空配列 
 // ── 署名検証 ──────────────────────────────────────────────────
 function verifySignature(body: string, signature: string | null, secret: string): boolean {
   if (!signature) return false;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const crypto = require('crypto') as typeof import('crypto');
   const hash = crypto.createHmac('sha256', secret).update(body).digest('base64');
   return hash === signature;
 }
