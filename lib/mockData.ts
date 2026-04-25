@@ -1,0 +1,92 @@
+import { Case } from '@/types';
+
+export const mockCases: Case[] = [
+  {
+    id: '1',
+    address: '大阪市住之江区北島3丁目2-8',
+    ownerName: '北島靖章',
+    status: '訪問対象',
+    rank: 'A',
+    lat: 34.615,
+    lng: 135.486,
+    phone: '090-1234-5678',
+    loanAmount: 2800,
+    bankName: '住信SBIネット銀行',
+    visits: [
+      {
+        id: 'v1',
+        date: '2026-04-20',
+        result: '△',
+        memo: '不在。郵便受けにチラシ投函済み。',
+      },
+      {
+        id: 'v2',
+        date: '2026-04-25',
+        result: '○',
+        memo: '奥様と面談。旦那様と相談したいとのこと。来週再訪予定。',
+      },
+    ],
+  },
+  {
+    id: '2',
+    address: '大阪市東住吉区今川4丁目11-3',
+    ownerName: '田中美佐子',
+    status: '訪問対象',
+    rank: 'A',
+    lat: 34.621,
+    lng: 135.532,
+    phone: '06-1234-5678',
+    loanAmount: 3200,
+    bankName: 'SBI新生銀行',
+    visits: [
+      {
+        id: 'v3',
+        date: '2026-04-25',
+        result: '○',
+        memo: '本人と面談。任意売却に前向き。詳細資料を郵送予定。',
+      },
+    ],
+  },
+  {
+    id: '3',
+    address: '大阪市住吉区長居1丁目5-12',
+    ownerName: '山本健二',
+    status: '訪問対象',
+    rank: 'B',
+    lat: 34.606,
+    lng: 135.516,
+    phone: '090-9876-5432',
+    loanAmount: 1800,
+    bankName: 'アイフルホーム',
+    visits: [],
+  },
+  {
+    id: '4',
+    address: '大阪市平野区加美北3丁目8-2',
+    ownerName: '松本裕子',
+    status: '未訪問',
+    rank: 'B',
+    lat: 34.640,
+    lng: 135.555,
+    phone: '090-5555-1234',
+    loanAmount: 2100,
+    bankName: 'オリックス銀行',
+    visits: [],
+  },
+  {
+    id: '5',
+    address: '大阪市西成区玉出中1丁目3-9',
+    ownerName: '川口正男',
+    status: '未訪問',
+    rank: 'C',
+    lat: 34.633,
+    lng: 135.488,
+    phone: '06-9999-0000',
+    loanAmount: 1500,
+    bankName: 'PayPay銀行',
+    visits: [],
+  },
+];
+
+export const getCaseById = (id: string): Case | undefined =>
+  mockCases.find((c) => c.id === id);
