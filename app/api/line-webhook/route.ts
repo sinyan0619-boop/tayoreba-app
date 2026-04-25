@@ -1,21 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
+export const runtime    = 'nodejs';
+export const dynamic    = 'force-dynamic';
+export const maxDuration = 60; // 画像OCRに十分な時間を確保
 
-// ── LINE API ヘルパー ──────────────────────────────────────────
-async function getLineImageBuffer(messageId: string, token: string): Promise<Buffer> {
+// ── LINE API ヘルパー ─────────────────────────────────────────
+async function getLineImage(
+  messageId: string,
+  token: string
+): Promise<{ buffer: Buffer; mimeType: string }> {
   const res = await fetch(
     `https://api-data.line.me/v2/bot/message/${messageId}/content`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
-  if (!res.ok) throw new Error(`LINE image fetch failed: ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
+  if (!res.ok) throw new Error(`LINE image fetch failed: ${res.status} ${res.statusText}`);
+
+  // Content-Type から実際の形式を取得（jpeg / png / webp など）
+  const ct = res.headers.get('content-type') ?? 'image/jpeg';
+  const mimeType = ct.split(';')[0].trim() as
+    | 'image/jpeg'
+    | 'image/png'
+    | 'image/gif'
+    | 'image/webp';
+
+  const buffer = Buffer.from(await res.arrayBuffer());
+  return { buffer, mimeType };
 }
 
 async function replyLine(replyToken: string, text: string, token: string) {
-  await fetch('https://api.line.me/v2/bot/message/reply', {
+  const res = await fetch('https://api.line.me/v2/bot/message/reply', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -26,9 +40,13 @@ async function replyLine(replyToken: string, text: string, token: string) {
       messages: [{ type: 'text', text }],
     }),
   });
+  if (!res.ok) {
+    const body = await res.text();
+    console.error(`LINE reply failed: ${res.status}`, body);
+  }
 }
 
-// ── Claude OCR ────────────────────────────────────────────────
+// ── Claude OCR ───────────────────────────────────────────────
 interface ExtractedProperty {
   address: string;
   owner_name: string;
@@ -36,7 +54,10 @@ interface ExtractedProperty {
   notes?: string;
 }
 
-async function ocrWithClaude(imageBuffer: Buffer): Promise<ExtractedProperty[]> {
+async function ocrWithClaude(
+  buffer: Buffer,
+  mimeType: string
+): Promise<ExtractedProperty[]> {
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -51,8 +72,8 @@ async function ocrWithClaude(imageBuffer: Buffer): Promise<ExtractedProperty[]> 
             type: 'image',
             source: {
               type: 'base64',
-              media_type: 'image/jpeg',
-              data: imageBuffer.toString('base64'),
+              media_type: mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+              data: buffer.toString('base64'),
             },
           },
           {
@@ -71,7 +92,8 @@ JSONのみ返してください。物件が見つからない場合は空配列 
     .map((b) => (b as { type: 'text'; text: string }).text)
     .join('');
 
-  // JSON部分を抽出
+  console.log('Claude raw response:', text.slice(0, 500));
+
   const match = text.match(/\[[\s\S]*\]/);
   if (!match) return [];
 
@@ -79,7 +101,7 @@ JSONのみ返してください。物件が見つからない場合は空配列 
   return Array.isArray(parsed) ? parsed : [];
 }
 
-// ── 署名検証 ──────────────────────────────────────────────────
+// ── 署名検証 ─────────────────────────────────────────────────
 function verifySignature(body: string, signature: string | null, secret: string): boolean {
   if (!signature) return false;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -95,8 +117,9 @@ export async function POST(req: NextRequest) {
   const secret    = process.env.LINE_CHANNEL_SECRET ?? '';
   const token     = process.env.LINE_CHANNEL_ACCESS_TOKEN ?? '';
 
-  // 署名検証（LINE_CHANNEL_SECRET未設定の場合はスキップ）
-  if (secret !== 'xxx' && !verifySignature(body, signature, secret)) {
+  // 署名検証
+  if (secret && secret !== 'xxx' && !verifySignature(body, signature, secret)) {
+    console.error('Signature mismatch. Expected:', signature);
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
 
@@ -113,31 +136,37 @@ export async function POST(req: NextRequest) {
     if (event.type !== 'message') continue;
     const { replyToken, message } = event;
 
-    // ── テキストメッセージ（ヘルプ）──────────────────────────
+    // ── テキストメッセージ（ヘルプ）─────────────────────────
     if (message.type === 'text') {
       await replyLine(
         replyToken,
-        '競売物件リストの画像を送ってください。OCRで物件情報を自動登録します。',
+        '競売物件リストの画像を送ってください。\nOCRで物件情報を自動登録します。',
         token
       );
       continue;
     }
 
-    // ── 画像メッセージ → OCR → DB登録 ──────────────────────
+    // ── 画像メッセージ → OCR → DB登録 ─────────────────────
     if (message.type === 'image') {
       try {
-        // 1. LINEから画像取得
-        const imageBuffer = await getLineImageBuffer(message.id, token);
+        // 1. 画像取得（MIMEタイプも取得）
+        const { buffer, mimeType } = await getLineImage(message.id, token);
+        console.log(`Image received: ${mimeType}, size: ${buffer.length} bytes`);
 
-        // 2. Claude APIでOCR
-        const properties = await ocrWithClaude(imageBuffer);
+        // 2. Claude OCR
+        const properties = await ocrWithClaude(buffer, mimeType);
+        console.log(`Extracted ${properties.length} properties`);
 
         if (properties.length === 0) {
-          await replyLine(replyToken, '物件情報を抽出できませんでした。競売物件リストの画像を送ってください。', token);
+          await replyLine(
+            replyToken,
+            '物件情報を抽出できませんでした。\n競売物件リストの画像を送ってください。',
+            token
+          );
           continue;
         }
 
-        // 3. Supabaseに登録
+        // 3. Supabase登録
         const toInsert = properties
           .filter((p) => p.address && p.owner_name)
           .map((p) => ({
@@ -154,24 +183,27 @@ export async function POST(req: NextRequest) {
           .insert(toInsert)
           .select('id');
 
-        if (error) throw error;
+        if (error) throw new Error(`Supabase error: ${error.message} (${error.code})`);
 
-        // 4. 結果をLINEに返信
+        // 4. 返信
         const lines = [
           `✅ ${data?.length ?? 0}件を登録しました`,
-          ``,
+          '',
           ...properties.slice(0, 5).map(
             (p, i) => `${i + 1}. ${p.owner_name}（${p.address}）`
           ),
-          properties.length > 5 ? `...他${properties.length - 5}件` : '',
-        ].filter(Boolean);
+          ...(properties.length > 5 ? [`...他${properties.length - 5}件`] : []),
+        ];
 
         await replyLine(replyToken, lines.join('\n'), token);
-      } catch (err) {
-        console.error('LINE webhook error:', err);
+
+      } catch (err: any) {
+        const msg = err?.message ?? String(err);
+        console.error('LINE webhook error:', msg, err?.stack);
+        // デバッグ用に一時的にエラー内容をLINEに返す
         await replyLine(
           replyToken,
-          '処理中にエラーが発生しました。しばらくしてから再試行してください。',
+          `⚠️ エラーが発生しました\n${msg.slice(0, 200)}`,
           token
         );
       }
