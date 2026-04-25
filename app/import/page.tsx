@@ -2,6 +2,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Header from '@/components/Header';
+import { supabase } from '@/lib/supabase';
 import { CaseRank, CaseStatus } from '@/types';
 
 // ── CSV パーサー ────────────────────────────────────────────────
@@ -148,24 +149,27 @@ export default function ImportPage() {
   const validCount = rowErrors.filter((e) => e.length === 0).length;
   const errorCount = rowErrors.filter((e) => e.length > 0).length;
 
-  const handleImport = () => {
-    // TODO: Supabase連携時は supabase.from('cases').insert(validRows) に差し替え
-    const imported = rows.filter((_, i) => rowErrors[i].length === 0).map((row, i) => ({
-      id: `import-${Date.now()}-${i}`,
-      address: mapping.address ? (row[mapping.address] ?? '') : '',
-      ownerName: mapping.ownerName ? (row[mapping.ownerName] ?? '') : '',
+  const handleImport = async () => {
+    const validRows = rows.filter((_, i) => rowErrors[i].length === 0);
+    const toInsert = validRows.map((row) => ({
+      address:     (mapping.address    ? row[mapping.address]    : '') || '',
+      owner_name:  (mapping.ownerName  ? row[mapping.ownerName]  : '') || '',
       status: (VALID_STATUSES.has(mapping.status ? (row[mapping.status] ?? '') : '')
-        ? (mapping.status ? row[mapping.status] : '未訪問')
+        ? row[mapping.status!]
         : '未訪問') as CaseStatus,
       rank: (VALID_RANKS.has(mapping.rank ? (row[mapping.rank] ?? '') : '')
-        ? (mapping.rank ? row[mapping.rank] : 'C')
+        ? row[mapping.rank!]
         : 'C') as CaseRank,
-      assignee: mapping.assignee ? row[mapping.assignee] : undefined,
-      caseNumber: mapping.caseNumber ? row[mapping.caseNumber] : undefined,
-      notes: mapping.notes ? row[mapping.notes] : undefined,
-      lat: 34.622, lng: 135.508, visits: [],
+      assignee:     mapping.assignee    ? (row[mapping.assignee]    || null) : null,
+      case_number:  mapping.caseNumber  ? (row[mapping.caseNumber]  || null) : null,
+      notes:        mapping.notes       ? (row[mapping.notes]        || null) : null,
     }));
-    console.log('Import:', imported);
+
+    const { error } = await supabase.from('properties').insert(toInsert);
+    if (error) {
+      alert(`インポートに失敗しました: ${error.message}`);
+      return;
+    }
     setResult({ success: validCount, error: errorCount });
     setStep('result');
   };

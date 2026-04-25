@@ -4,8 +4,18 @@ export type VisitResult = '○' | '△' | '✖';
 
 export interface Visit {
   id: string;
+  // DBカラム
+  property_id?: string;
+  contact_type?: string;
+  summary?: string;
+  judgment?: VisitResult | null;
+  next_action?: string;
+  next_date?: string;
+  requests?: string;
+  created_at?: string;
+  // UIで使うエイリアス（dbToVisitで付与）
   date: string;
-  result: VisitResult;
+  result: VisitResult | null;
   memo: string;
 }
 
