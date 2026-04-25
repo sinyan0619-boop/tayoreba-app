@@ -1,8 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import { Case, CaseRank, CaseStatus, Visit, VisitResult } from '@/types';
 
-const url  = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+// build時にenv未設定でも createClient が throw しないようフォールバックを設定
+const url  = process.env.NEXT_PUBLIC_SUPABASE_URL  ?? 'https://placeholder.supabase.co';
+const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? 'placeholder-anon-key';
 
 // クライアント / サーバー共用（anon key）
 export const supabase = createClient(url, anon);
