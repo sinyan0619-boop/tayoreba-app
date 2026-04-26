@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const url = 'https://dudohddweivuoaxgtik.supabase.co/rest/v1/properties';
+  const url = 'https://dudohddweivuoaaxgtik.supabase.co/rest/v1/properties';
   const key = 'sb_publishable__Tzg8urjfpW0g_USZ_zMBg_RwXXT8MK';
 
   try {
