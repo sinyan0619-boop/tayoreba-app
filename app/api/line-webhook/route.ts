@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
-    // 画像 → OCR → 結果返信
+    // 画像 → OCR → DB保存 → 結果返信
     if (message.type === 'image') {
       try {
         const { buffer, mimeType } = await getLineImage(message.id, token);
@@ -154,15 +154,47 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
+        // Supabase REST API で保存
+        const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+        const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+        const toInsert = properties
+          .filter((p) => p.address && p.owner_name)
+          .map((p) => ({
+            address:     p.address,
+            owner_name:  p.owner_name,
+            case_number: p.case_number ?? null,
+            notes:       p.notes       ?? null,
+            status:      '未訪問',
+            rank:        'C',
+          }));
+
+        const insertRes = await fetch(`${sbUrl}/rest/v1/properties`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey':        sbKey,
+            'Authorization': `Bearer ${sbKey}`,
+            'Prefer':        'return=representation',
+          },
+          body: JSON.stringify(toInsert),
+        });
+
+        if (!insertRes.ok) {
+          const errBody = await insertRes.text();
+          throw new Error(`Supabase insert failed: ${insertRes.status} ${errBody}`);
+        }
+
+        const inserted: { id: string }[] = await insertRes.json();
+
         const lines = [
-          `📋 解析結果：`,
+          `✅ ${inserted.length}件を登録しました`,
+          '',
           ...properties.slice(0, 5).map((p) => [
             `・住所：${p.address}`,
             `・所有者：${p.owner_name}`,
             ...(p.case_number ? [`・事件番号：${p.case_number}`] : []),
           ].join('\n')),
           ...(properties.length > 5 ? [`...他${properties.length - 5}件`] : []),
-          `（${properties.length}件検出）`,
         ];
 
         await replyLine(replyToken, lines.join('\n\n'), token);
