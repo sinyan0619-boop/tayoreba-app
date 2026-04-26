@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime    = 'nodejs';
 export const dynamic    = 'force-dynamic';
-export const maxDuration = 60; // 画像OCRに十分な時間を確保
+export const maxDuration = 60;
 
 // ── LINE API ヘルパー ─────────────────────────────────────────
 async function getLineImage(
@@ -15,14 +15,8 @@ async function getLineImage(
   );
   if (!res.ok) throw new Error(`LINE image fetch failed: ${res.status} ${res.statusText}`);
 
-  // Content-Type から実際の形式を取得（jpeg / png / webp など）
   const ct = res.headers.get('content-type') ?? 'image/jpeg';
-  const mimeType = ct.split(';')[0].trim() as
-    | 'image/jpeg'
-    | 'image/png'
-    | 'image/gif'
-    | 'image/webp';
-
+  const mimeType = ct.split(';')[0].trim();
   const buffer = Buffer.from(await res.arrayBuffer());
   return { buffer, mimeType };
 }
@@ -116,9 +110,8 @@ export async function POST(req: NextRequest) {
   const secret    = process.env.LINE_CHANNEL_SECRET ?? '';
   const token     = process.env.LINE_CHANNEL_ACCESS_TOKEN ?? '';
 
-  // 署名検証
   if (secret && secret !== 'xxx' && !verifySignature(body, signature, secret)) {
-    console.error('Signature mismatch. Expected:', signature);
+    console.error('Signature mismatch');
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
 
@@ -129,36 +122,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const sbUrl  = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const sbKey  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  const sbHeaders = {
-    'Content-Type': 'application/json',
-    'apikey': sbKey,
-    'Authorization': `Bearer ${sbKey}`,
-  };
-
   for (const event of events) {
     if (event.type !== 'message') continue;
     const { replyToken, message } = event;
 
-    // ── テキストメッセージ（ヘルプ）─────────────────────────
+    // テキスト → ヘルプ返信
     if (message.type === 'text') {
       await replyLine(
         replyToken,
-        '競売物件リストの画像を送ってください。\nOCRで物件情報を自動登録します。',
+        '競売物件リストの画像を送ってください。\nOCRで物件情報を解析します。',
         token
       );
       continue;
     }
 
-    // ── 画像メッセージ → OCR → DB登録 ─────────────────────
+    // 画像 → OCR → 結果返信
     if (message.type === 'image') {
       try {
-        // 1. 画像取得（MIMEタイプも取得）
         const { buffer, mimeType } = await getLineImage(message.id, token);
         console.log(`Image received: ${mimeType}, size: ${buffer.length} bytes`);
 
-        // 2. Claude OCR
         const properties = await ocrWithClaude(buffer, mimeType);
         console.log(`Extracted ${properties.length} properties`);
 
@@ -171,45 +154,18 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        // 3. Supabase REST API で登録
-        const toInsert = properties
-          .filter((p) => p.address && p.owner_name)
-          .map((p) => ({
-            address:     p.address,
-            owner_name:  p.owner_name,
-            case_number: p.case_number ?? null,
-            notes:       p.notes       ?? null,
-            status:      '未訪問',
-            rank:        'C',
-          }));
-
-        const insertRes = await fetch(
-          `${sbUrl}/rest/v1/properties`,
-          {
-            method: 'POST',
-            headers: { ...sbHeaders, 'Prefer': 'return=representation' },
-            body: JSON.stringify(toInsert),
-          }
-        );
-
-        if (!insertRes.ok) {
-          const errBody = await insertRes.text();
-          throw new Error(`Supabase insert failed: ${insertRes.status} ${errBody}`);
-        }
-
-        const inserted: { id: string }[] = await insertRes.json();
-
-        // 4. 返信
         const lines = [
-          `✅ ${inserted.length}件を登録しました`,
-          '',
-          ...properties.slice(0, 5).map(
-            (p, i) => `${i + 1}. ${p.owner_name}（${p.address}）`
-          ),
+          `📋 解析結果：`,
+          ...properties.slice(0, 5).map((p) => [
+            `・住所：${p.address}`,
+            `・所有者：${p.owner_name}`,
+            ...(p.case_number ? [`・事件番号：${p.case_number}`] : []),
+          ].join('\n')),
           ...(properties.length > 5 ? [`...他${properties.length - 5}件`] : []),
+          `（${properties.length}件検出）`,
         ];
 
-        await replyLine(replyToken, lines.join('\n'), token);
+        await replyLine(replyToken, lines.join('\n\n'), token);
 
       } catch (err: any) {
         const msg = err?.message ?? String(err);
