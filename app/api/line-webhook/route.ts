@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
         const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
         const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
         const toInsert = properties
-          .filter((p) => p.address && p.owner_name)
+          .filter((p) => p.address)
           .map((p) => ({
             address:     p.address,
             owner_name:  p.owner_name,
