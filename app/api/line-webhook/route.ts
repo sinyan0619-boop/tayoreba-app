@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
 export const runtime    = 'nodejs';
 export const dynamic    = 'force-dynamic';
@@ -130,11 +129,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
-  );
+  const sbUrl  = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const sbKey  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const sbHeaders = {
+    'Content-Type': 'application/json',
+    'apikey': sbKey,
+    'Authorization': `Bearer ${sbKey}`,
+  };
 
   for (const event of events) {
     if (event.type !== 'message') continue;
@@ -170,7 +171,7 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        // 3. Supabase登録
+        // 3. Supabase REST API で登録
         const toInsert = properties
           .filter((p) => p.address && p.owner_name)
           .map((p) => ({
@@ -182,16 +183,25 @@ export async function POST(req: NextRequest) {
             rank:        'C',
           }));
 
-        const { data, error } = await supabaseAdmin
-          .from('properties')
-          .insert(toInsert)
-          .select('id');
+        const insertRes = await fetch(
+          `${sbUrl}/rest/v1/properties`,
+          {
+            method: 'POST',
+            headers: { ...sbHeaders, 'Prefer': 'return=representation' },
+            body: JSON.stringify(toInsert),
+          }
+        );
 
-        if (error) throw new Error(`Supabase error: ${error.message} (${error.code})`);
+        if (!insertRes.ok) {
+          const errBody = await insertRes.text();
+          throw new Error(`Supabase insert failed: ${insertRes.status} ${errBody}`);
+        }
+
+        const inserted: { id: string }[] = await insertRes.json();
 
         // 4. 返信
         const lines = [
-          `✅ ${data?.length ?? 0}件を登録しました`,
+          `✅ ${inserted.length}件を登録しました`,
           '',
           ...properties.slice(0, 5).map(
             (p, i) => `${i + 1}. ${p.owner_name}（${p.address}）`
@@ -204,7 +214,6 @@ export async function POST(req: NextRequest) {
       } catch (err: any) {
         const msg = err?.message ?? String(err);
         console.error('LINE webhook error:', msg, err?.stack);
-        // デバッグ用に一時的にエラー内容をLINEに返す
         await replyLine(
           replyToken,
           `⚠️ エラーが発生しました\n${msg.slice(0, 200)}`,
