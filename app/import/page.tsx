@@ -4,6 +4,43 @@ import { useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import { CaseRank, CaseStatus } from '@/types';
 
+// ── xlsx パーサー（.xlsx / .xls 直接読込）──────────────────────────
+async function parseXLSX(buffer: ArrayBuffer): Promise<{ headers: string[]; rows: Record<string, string>[] }> {
+  const XLSX = await import('xlsx');
+  const wb = XLSX.read(new Uint8Array(buffer), { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const raw = XLSX.utils.sheet_to_json<(string | number | null)[]>(ws, { header: 1, raw: false, defval: '' });
+
+  if (raw.length < 2) return { headers: [], rows: [] };
+
+  // 1行目がタイトル行の場合はスキップ、2行目をヘッダーとして使う
+  // ヘッダー行の判定: '事件番号'/'住所'/'所在地' いずれかを含む行を探す
+  let headerIdx = 0;
+  for (let i = 0; i < Math.min(raw.length, 5); i++) {
+    const row = raw[i].map((v) => String(v ?? ''));
+    if (row.some((v) => v.includes('事件番号') || v.includes('所在地') || v.includes('住所') || v.includes('所有者'))) {
+      headerIdx = i;
+      break;
+    }
+  }
+
+  const headers = raw[headerIdx].map((v) =>
+    String(v ?? '').replace(/\n/g, '').replace(/\s+/g, ' ').trim()
+  );
+
+  const rows = raw.slice(headerIdx + 1)
+    .map((row) =>
+      headers.reduce<Record<string, string>>((acc, h, i) => {
+        const val = String(row[i] ?? '').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+        return { ...acc, [h]: val };
+      }, {})
+    )
+    // 全フィールドが空の行を除外
+    .filter((row) => Object.values(row).some((v) => v.trim() !== ''));
+
+  return { headers, rows };
+}
+
 // ── CSV パーサー ────────────────────────────────────────────────
 function parseCSVLine(line: string): string[] {
   const fields: string[] = [];
@@ -112,17 +149,33 @@ export default function ImportPage() {
   const [result, setResult] = useState({ success: 0, error: 0 });
 
   const processFile = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      const { headers: h, rows: r } = parseCSV(text);
-      if (h.length === 0) { alert('CSVを正しく読み込めませんでした'); return; }
-      setHeaders(h);
-      setRows(r);
-      setMapping(autoMap(h));
-      setStep('mapping');
-    };
-    reader.readAsText(file, 'UTF-8');
+    const isXlsx = /\.(xlsx|xls)$/i.test(file.name);
+
+    if (isXlsx) {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const buffer = e.target?.result as ArrayBuffer;
+        const { headers: h, rows: r } = await parseXLSX(buffer);
+        if (h.length === 0) { alert('Excelファイルを正しく読み込めませんでした'); return; }
+        setHeaders(h);
+        setRows(r);
+        setMapping(autoMap(h));
+        setStep('mapping');
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target?.result as string;
+        const { headers: h, rows: r } = parseCSV(text);
+        if (h.length === 0) { alert('CSVを正しく読み込めませんでした'); return; }
+        setHeaders(h);
+        setRows(r);
+        setMapping(autoMap(h));
+        setStep('mapping');
+      };
+      reader.readAsText(file, 'UTF-8');
+    }
   };
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -211,13 +264,13 @@ export default function ImportPage() {
             >
               <span className="text-4xl mb-3">📂</span>
               <p className="font-semibold text-gray-700 text-sm">
-                CSVファイルをドロップ
+                ExcelまたはCSVをドロップ
               </p>
-              <p className="text-xs text-gray-400 mt-1">またはタップしてファイルを選択</p>
+              <p className="text-xs text-gray-400 mt-1">.xlsx / .xls / .csv 対応</p>
               <input
                 ref={fileRef}
                 type="file"
-                accept=".csv,text/csv"
+                accept=".xlsx,.xls,.csv,text/csv"
                 className="hidden"
                 onChange={onFileChange}
               />
