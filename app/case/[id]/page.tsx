@@ -3,6 +3,7 @@ import Link from 'next/link';
 import Header from '@/components/Header';
 import { RankBadge, StatusBadge } from '@/components/StatusBadge';
 import { supabase, dbToCase } from '@/lib/supabase';
+import { DeleteButton } from './DeleteButton';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -84,6 +85,8 @@ export default async function CaseDetailPage({ params }: Props) {
         >
           <span>✏️</span> 訪問記録を入力
         </Link>
+
+        <DeleteButton id={c.id} />
 
         {/* 訪問履歴タイムライン */}
         <div className="bg-white rounded-2xl overflow-hidden shadow-sm">
