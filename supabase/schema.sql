@@ -19,8 +19,9 @@ CREATE TABLE IF NOT EXISTS properties (
   bank_name     TEXT,
   assignee      TEXT,
   case_number   TEXT,
-  notes         TEXT,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  notes           TEXT,
+  import_batch_id UUID,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- visitsテーブル（訪問記録）
@@ -39,6 +40,7 @@ CREATE TABLE IF NOT EXISTS visits (
 -- インデックス
 CREATE INDEX IF NOT EXISTS idx_properties_status ON properties(status);
 CREATE INDEX IF NOT EXISTS idx_properties_rank   ON properties(rank);
+CREATE INDEX IF NOT EXISTS idx_properties_batch  ON properties(import_batch_id);
 CREATE INDEX IF NOT EXISTS idx_visits_property   ON visits(property_id);
 CREATE INDEX IF NOT EXISTS idx_visits_created    ON visits(created_at DESC);
 

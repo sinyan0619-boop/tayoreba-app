@@ -209,18 +209,20 @@ export default function ImportPage() {
 
   const handleImport = async () => {
     const validRows = dataRows.filter((_, i) => rowErrors[i].length === 0);
+    const batchId = crypto.randomUUID();
     const toInsert = validRows.map((row) => ({
-      address:     (mapping.address    ? row[mapping.address]    : '') || '',
-      owner_name:  (mapping.ownerName  ? row[mapping.ownerName]  : '') || '',
+      address:         (mapping.address    ? row[mapping.address]    : '') || '',
+      owner_name:      (mapping.ownerName  ? row[mapping.ownerName]  : '') || '',
       status: (VALID_STATUSES.has(mapping.status ? (row[mapping.status] ?? '') : '')
         ? row[mapping.status!]
         : '未訪問') as CaseStatus,
       rank: (VALID_RANKS.has(mapping.rank ? (row[mapping.rank] ?? '') : '')
         ? row[mapping.rank!]
         : 'C') as CaseRank,
-      assignee:     mapping.assignee    ? (row[mapping.assignee]    || null) : null,
-      case_number:  mapping.caseNumber  ? (row[mapping.caseNumber]  || null) : null,
-      notes:        mapping.notes       ? (row[mapping.notes]        || null) : null,
+      assignee:        mapping.assignee    ? (row[mapping.assignee]    || null) : null,
+      case_number:     mapping.caseNumber  ? (row[mapping.caseNumber]  || null) : null,
+      notes:           mapping.notes       ? (row[mapping.notes]        || null) : null,
+      import_batch_id: batchId,
     }));
 
     const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -246,7 +248,15 @@ export default function ImportPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <Header title="CSVインポート" backHref="/cases" />
+      <Header
+        title="CSVインポート"
+        backHref="/cases"
+        right={
+          <a href="/import/history" className="text-xs text-blue-500 font-medium">
+            インポート履歴
+          </a>
+        }
+      />
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
 
