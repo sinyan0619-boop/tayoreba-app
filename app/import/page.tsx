@@ -2,7 +2,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Header from '@/components/Header';
-import { supabase } from '@/lib/supabase';
 import { CaseRank, CaseStatus } from '@/types';
 
 // ── CSV パーサー ────────────────────────────────────────────────
@@ -30,13 +29,16 @@ function parseCSV(text: string): { headers: string[]; rows: Record<string, strin
   const lines = clean.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter((l) => l.trim());
   if (lines.length < 2) return { headers: [], rows: [] };
   const headers = parseCSVLine(lines[0]);
-  const rows = lines.slice(1).map((line) => {
-    const vals = parseCSVLine(line);
-    return headers.reduce<Record<string, string>>(
-      (acc, h, i) => ({ ...acc, [h]: vals[i] ?? '' }),
-      {}
-    );
-  });
+  const rows = lines.slice(1)
+    .map((line) => {
+      const vals = parseCSVLine(line);
+      return headers.reduce<Record<string, string>>(
+        (acc, h, i) => ({ ...acc, [h]: vals[i] ?? '' }),
+        {}
+      );
+    })
+    // 全フィールドが空の行（空白行）を除外
+    .filter((row) => Object.values(row).some((v) => v.trim() !== ''));
   return { headers, rows };
 }
 
@@ -82,8 +84,6 @@ function validateRow(
   const errors: string[] = [];
   const address = mapping.address ? (row[mapping.address] ?? '') : '';
   if (!address.trim()) errors.push('住所が空です');
-  const name = mapping.ownerName ? (row[mapping.ownerName] ?? '') : '';
-  if (!name.trim()) errors.push('所有者名が空です');
   const status = mapping.status ? (row[mapping.status] ?? '') : '';
   if (status && !VALID_STATUSES.has(status))
     errors.push(`ステータス「${status}」は無効（未訪問/訪問対象外/訪問対象/媒介/契約）`);
@@ -165,9 +165,21 @@ export default function ImportPage() {
       notes:        mapping.notes       ? (row[mapping.notes]        || null) : null,
     }));
 
-    const { error } = await supabase.from('properties').insert(toInsert);
-    if (error) {
-      alert(`インポートに失敗しました: ${error.message}`);
+    const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const sbKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const res = await fetch(`${sbUrl}/rest/v1/properties`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey':        sbKey,
+        'Authorization': `Bearer ${sbKey}`,
+        'Prefer':        'return=minimal',
+      },
+      body: JSON.stringify(toInsert),
+    });
+    if (!res.ok) {
+      const errBody = await res.text();
+      alert(`インポートに失敗しました: ${res.status} ${errBody}`);
       return;
     }
     setResult({ success: validCount, error: errorCount });
