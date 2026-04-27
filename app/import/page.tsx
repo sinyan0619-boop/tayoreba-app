@@ -145,12 +145,17 @@ export default function ImportPage() {
     URL.revokeObjectURL(url);
   };
 
-  const rowErrors = rows.map((r) => validateRow(r, mapping));
+  // 住所列が空の行はエラーではなくスキップ（続き行・空白行扱い）
+  const dataRows = mapping.address
+    ? rows.filter((r) => (r[mapping.address!] ?? '').trim() !== '')
+    : rows;
+  const skippedCount = rows.length - dataRows.length;
+  const rowErrors = dataRows.map((r) => validateRow(r, mapping));
   const validCount = rowErrors.filter((e) => e.length === 0).length;
   const errorCount = rowErrors.filter((e) => e.length > 0).length;
 
   const handleImport = async () => {
-    const validRows = rows.filter((_, i) => rowErrors[i].length === 0);
+    const validRows = dataRows.filter((_, i) => rowErrors[i].length === 0);
     const toInsert = validRows.map((row) => ({
       address:     (mapping.address    ? row[mapping.address]    : '') || '',
       owner_name:  (mapping.ownerName  ? row[mapping.ownerName]  : '') || '',
@@ -306,8 +311,10 @@ export default function ImportPage() {
             {/* サマリー */}
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-white rounded-2xl p-3 text-center shadow-sm">
-                <div className="text-xl font-bold text-gray-800">{rows.length}</div>
-                <div className="text-xs text-gray-500 mt-1">合計行</div>
+                <div className="text-xl font-bold text-gray-800">{dataRows.length}</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  有効行{skippedCount > 0 && <span className="text-gray-400">（{skippedCount}件除外）</span>}
+                </div>
               </div>
               <div className="bg-white rounded-2xl p-3 text-center shadow-sm">
                 <div className="text-xl font-bold text-green-600">{validCount}</div>
@@ -335,7 +342,7 @@ export default function ImportPage() {
                 </button>
               </div>
               <div className="divide-y divide-gray-100">
-                {rows.slice(0, 5).map((row, i) => {
+                {dataRows.slice(0, 5).map((row, i) => {
                   const errs = rowErrors[i];
                   const hasError = errs.length > 0;
                   return (
@@ -392,9 +399,9 @@ export default function ImportPage() {
                     </div>
                   );
                 })}
-                {rows.length > 5 && (
+                {dataRows.length > 5 && (
                   <div className="px-4 py-2 text-xs text-gray-400 text-center">
-                    他 {rows.length - 5} 件
+                    他 {dataRows.length - 5} 件
                   </div>
                 )}
               </div>
