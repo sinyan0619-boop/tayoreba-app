@@ -1,4 +1,5 @@
 'use client'
+import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 const STATUSES = ['すべて', '未訪問', '訪問対象外', '訪問対象', '媒介', '契約']
@@ -14,6 +15,9 @@ export function CasesFilter({ assignees }: { assignees: string[] }) {
   const pref     = sp.get('pref')     ?? ''
   const assignee = sp.get('assignee') ?? ''
 
+  const [inputValue, setInputValue] = useState(q)
+  useEffect(() => setInputValue(q), [q])
+
   const update = (key: string, val: string) => {
     const params = new URLSearchParams(sp.toString())
     if (val) params.set(key, val)
@@ -21,15 +25,27 @@ export function CasesFilter({ assignees }: { assignees: string[] }) {
     router.push(`/cases?${params.toString()}`)
   }
 
+  const submitSearch = (val: string) => update('q', val)
+
   return (
     <div className="bg-white border-b border-gray-100 px-4 py-3 space-y-2 shrink-0">
-      <input
-        type="search"
-        value={q}
-        onChange={(e) => update('q', e.target.value)}
-        placeholder="名前・住所で検索..."
-        className="w-full text-sm border border-gray-200 rounded-xl px-4 py-2 bg-white focus:outline-none focus:border-blue-400"
-      />
+      <div className="flex gap-2">
+        <input
+          type="search"
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submitSearch(inputValue)}
+          placeholder="名前・住所で検索... （Enterで検索）"
+          className="flex-1 text-sm border border-gray-200 rounded-xl px-4 py-2 bg-white focus:outline-none focus:border-blue-400"
+        />
+        <button
+          onClick={() => submitSearch(inputValue)}
+          className="px-4 py-2 rounded-xl text-sm font-medium text-white shrink-0"
+          style={{ backgroundColor: '#1a1a2e' }}
+        >
+          検索
+        </button>
+      </div>
       <div className="flex gap-2">
         <select value={status} onChange={(e) => update('status', e.target.value)} className={selectCls}>
           {STATUSES.map((s) => <option key={s} value={s === 'すべて' ? '' : s}>{s}</option>)}
