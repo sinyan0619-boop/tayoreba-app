@@ -23,8 +23,7 @@ export default async function CasesPage({ searchParams }: Props) {
   let query = supabase
     .from('properties')
     .select('*, visits(*)')
-    .order('rank', { ascending: true })
-    .order('created_at', { ascending: false })
+    .order('updated_at', { ascending: false })
 
   if (status) query = query.eq('status', status)
 

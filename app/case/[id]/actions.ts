@@ -14,7 +14,7 @@ export async function deleteProperty(id: string) {
 export async function updateStatus(id: string, status: CaseStatus) {
   const { error } = await supabase
     .from('properties')
-    .update({ status })
+    .update({ status, updated_at: new Date().toISOString() })
     .eq('id', id)
   if (error) throw new Error(error.message)
   revalidatePath('/cases')

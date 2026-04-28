@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS properties (
   case_number   TEXT,
   notes           TEXT,
   import_batch_id UUID,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- visitsテーブル（訪問記録）
