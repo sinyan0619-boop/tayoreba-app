@@ -81,6 +81,11 @@ export default function RecordPage() {
       return;
     }
 
+    await supabase
+      .from('properties')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', id);
+
     setSaved(true);
     setTimeout(() => router.push(`/case/${id}`), 1000);
   };
