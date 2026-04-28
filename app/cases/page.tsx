@@ -5,7 +5,7 @@ import { RankBadge, StatusBadge } from '@/components/StatusBadge';
 import { supabase, dbToCase } from '@/lib/supabase';
 import { CasesFilter } from './CasesFilter';
 
-export const revalidate = 30;
+export const revalidate = 0;
 
 function detectPref(address: string): string {
   if (address.includes('大阪')) return '大阪'

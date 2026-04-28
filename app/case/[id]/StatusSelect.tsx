@@ -1,11 +1,13 @@
 'use client'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { CaseStatus, STATUS_COLORS } from '@/types'
 import { updateStatus } from './actions'
 
 const STATUSES: CaseStatus[] = ['未訪問', '訪問対象外', '訪問対象', '媒介', '契約']
 
 export function StatusSelect({ id, current }: { id: string; current: CaseStatus }) {
+  const router = useRouter()
   const [status, setStatus] = useState(current)
   const [pending, setPending] = useState(false)
 
@@ -14,6 +16,7 @@ export function StatusSelect({ id, current }: { id: string; current: CaseStatus 
     setPending(true)
     setStatus(next)
     await updateStatus(id, next)
+    router.refresh()
     setPending(false)
   }
 
