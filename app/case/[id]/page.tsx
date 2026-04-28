@@ -1,10 +1,12 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import Header from '@/components/Header';
-import { RankBadge, StatusBadge } from '@/components/StatusBadge';
+import { RankBadge } from '@/components/StatusBadge';
 import { supabase, dbToCase } from '@/lib/supabase';
 import { DeleteButton } from './DeleteButton';
 import { StatusSelect } from './StatusSelect';
+import { RankSelect } from './RankSelect';
+import { VisitDeleteButton } from './VisitDeleteButton';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -34,28 +36,35 @@ export default async function CaseDetailPage({ params }: Props) {
 
   return (
     <div className="flex flex-col h-full">
-      <Header title={c.ownerName} backHref="/cases" />
+      <Header
+        title={c.ownerName}
+        backHref="/cases"
+        right={
+          <Link href={`/case/${id}/edit`} className="text-white/80 text-sm px-2 py-1">
+            編集
+          </Link>
+        }
+      />
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* 物件情報 */}
-        <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            <RankBadge rank={c.rank} />
-            {c.assignee && (
-              <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">
-                👤 {c.assignee}
-              </span>
-            )}
-          </div>
-          <StatusSelect id={c.id} current={c.status} />
+        <div className="bg-white rounded-2xl p-4 shadow-sm space-y-4">
+          {c.assignee && (
+            <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full inline-block">
+              👤 {c.assignee}
+            </span>
+          )}
 
-          <div className="space-y-2 text-sm">
+          <StatusSelect id={c.id} current={c.status} />
+          <RankSelect   id={c.id} current={c.rank} />
+
+          <div className="space-y-2 text-sm pt-1">
             <Row label="住所"   value={c.address} />
-            {c.phone     && <Row label="電話"   value={<a href={`tel:${c.phone}`} className="text-blue-600 underline">{c.phone}</a>} />}
+            {c.phone      && <Row label="電話"     value={<a href={`tel:${c.phone}`} className="text-blue-600 underline">{c.phone}</a>} />}
             {c.caseNumber && <Row label="事件番号" value={c.caseNumber} />}
-            {c.bankName  && <Row label="金融機関" value={c.bankName} />}
-            {c.loanAmount && <Row label="残債額" value={`${c.loanAmount.toLocaleString()}万円`} />}
-            {c.notes     && <Row label="備考"   value={c.notes} />}
+            {c.bankName   && <Row label="金融機関" value={c.bankName} />}
+            {c.loanAmount && <Row label="残債額"   value={`${c.loanAmount.toLocaleString()}万円`} />}
+            {c.notes      && <Row label="備考"     value={c.notes} />}
           </div>
         </div>
 
@@ -132,6 +141,7 @@ export default async function CaseDetailPage({ params }: Props) {
                       <p className="text-xs text-gray-400 mt-0.5">次回: {v.next_date}</p>
                     )}
                   </div>
+                  <VisitDeleteButton visitId={v.id} propertyId={c.id} />
                 </div>
               ))}
             </div>

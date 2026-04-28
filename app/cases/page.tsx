@@ -14,11 +14,11 @@ function detectPref(address: string): string {
 }
 
 interface Props {
-  searchParams: Promise<{ status?: string; pref?: string }>
+  searchParams: Promise<{ status?: string; pref?: string; assignee?: string; q?: string }>
 }
 
 export default async function CasesPage({ searchParams }: Props) {
-  const { status, pref } = await searchParams
+  const { status, pref, assignee, q } = await searchParams
 
   let query = supabase
     .from('properties')
@@ -30,24 +30,44 @@ export default async function CasesPage({ searchParams }: Props) {
   const { data } = await query
   let cases = (data ?? []).map(dbToCase)
 
-  if (pref) cases = cases.filter((c) => detectPref(c.address) === pref)
+  if (pref)     cases = cases.filter((c) => detectPref(c.address) === pref)
+  if (assignee) cases = cases.filter((c) => c.assignee === assignee)
+  if (q) {
+    const term = q.toLowerCase()
+    cases = cases.filter((c) =>
+      c.ownerName.toLowerCase().includes(term) ||
+      c.address.toLowerCase().includes(term)
+    )
+  }
+
+  const assignees = [...new Set(
+    (data ?? []).map((r) => r.assignee).filter(Boolean) as string[]
+  )].sort()
 
   return (
     <div className="flex flex-col h-full">
       <Header
         title="案件一覧"
         right={
-          <Link
-            href="/import"
-            className="flex items-center gap-1 bg-white/20 text-white text-xs font-medium px-3 py-1.5 rounded-full"
-          >
-            <span>📥</span> CSVインポート
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/cases/new"
+              className="flex items-center gap-1 bg-white/20 text-white text-xs font-medium px-3 py-1.5 rounded-full"
+            >
+              ＋ 追加
+            </Link>
+            <Link
+              href="/import"
+              className="flex items-center gap-1 bg-white/20 text-white text-xs font-medium px-3 py-1.5 rounded-full"
+            >
+              📥 CSV
+            </Link>
+          </div>
         }
       />
 
       <Suspense fallback={null}>
-        <CasesFilter />
+        <CasesFilter assignees={assignees} />
       </Suspense>
 
       <div className="flex-1 overflow-y-auto">
@@ -55,7 +75,7 @@ export default async function CasesPage({ searchParams }: Props) {
           <div className="flex flex-col items-center justify-center h-40 text-gray-400 text-sm gap-2">
             <span className="text-3xl">📋</span>
             案件がありません
-            <Link href="/import" className="text-blue-500 text-xs">CSVからインポート ›</Link>
+            <Link href="/cases/new" className="text-blue-500 text-xs">案件を追加 ›</Link>
           </div>
         ) : (
           <div className="divide-y divide-gray-100 bg-white">
