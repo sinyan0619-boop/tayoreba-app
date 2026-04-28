@@ -4,6 +4,7 @@ import Header from '@/components/Header';
 import { RankBadge, StatusBadge } from '@/components/StatusBadge';
 import { supabase, dbToCase } from '@/lib/supabase';
 import { DeleteButton } from './DeleteButton';
+import { StatusSelect } from './StatusSelect';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -39,7 +40,6 @@ export default async function CaseDetailPage({ params }: Props) {
         {/* 物件情報 */}
         <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <StatusBadge status={c.status} />
             <RankBadge rank={c.rank} />
             {c.assignee && (
               <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">
@@ -47,6 +47,7 @@ export default async function CaseDetailPage({ params }: Props) {
               </span>
             )}
           </div>
+          <StatusSelect id={c.id} current={c.status} />
 
           <div className="space-y-2 text-sm">
             <Row label="住所"   value={c.address} />

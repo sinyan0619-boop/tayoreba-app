@@ -1,18 +1,37 @@
 import Link from 'next/link';
+import { Suspense } from 'react';
 import Header from '@/components/Header';
 import { RankBadge, StatusBadge } from '@/components/StatusBadge';
 import { supabase, dbToCase } from '@/lib/supabase';
+import { CasesFilter } from './CasesFilter';
 
 export const revalidate = 30;
 
-export default async function CasesPage() {
-  const { data } = await supabase
+function detectPref(address: string): string {
+  if (address.includes('大阪')) return '大阪'
+  if (/滋賀|大津市|草津市|彦根市|長浜市|守山市|栗東市|甲賀市|野洲市|湖南市|高島市|東近江市|米原市/.test(address)) return '滋賀'
+  return '京都'
+}
+
+interface Props {
+  searchParams: Promise<{ status?: string; pref?: string }>
+}
+
+export default async function CasesPage({ searchParams }: Props) {
+  const { status, pref } = await searchParams
+
+  let query = supabase
     .from('properties')
     .select('*, visits(*)')
     .order('rank', { ascending: true })
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
 
-  const cases = (data ?? []).map(dbToCase);
+  if (status) query = query.eq('status', status)
+
+  const { data } = await query
+  let cases = (data ?? []).map(dbToCase)
+
+  if (pref) cases = cases.filter((c) => detectPref(c.address) === pref)
 
   return (
     <div className="flex flex-col h-full">
@@ -27,6 +46,10 @@ export default async function CasesPage() {
           </Link>
         }
       />
+
+      <Suspense fallback={null}>
+        <CasesFilter />
+      </Suspense>
 
       <div className="flex-1 overflow-y-auto">
         {cases.length === 0 ? (
