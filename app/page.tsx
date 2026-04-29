@@ -49,7 +49,6 @@ function CaseRow({ c, dimmed = false }: { c: Case; dimmed?: boolean }) {
         {c.phone && (
           <a
             href={`tel:${c.phone}`}
-            onClick={(e) => e.stopPropagation()}
             className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 active:bg-gray-200 text-base"
           >
             📞
@@ -59,7 +58,6 @@ function CaseRow({ c, dimmed = false }: { c: Case; dimmed?: boolean }) {
           href={mapsUrl(c.address)}
           target="_blank"
           rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
           className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 active:bg-gray-200 text-base"
         >
           🗺️
@@ -80,7 +78,7 @@ export default async function TodayPage() {
   const { data } = await supabase
     .from('properties')
     .select('*, visits(*)')
-    .not('status', 'in', '("訪問対象外","契約")')
+    .in('status', ['未訪問', '訪問対象', '媒介'])
     .order('rank', { ascending: true })
     .order('created_at', { referencedTable: 'visits', ascending: false });
 
