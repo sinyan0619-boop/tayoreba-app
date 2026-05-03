@@ -37,7 +37,9 @@ export default function MapPage() {
       if (!user) return;
       setUserId(user.id);
       auth.from('profiles').select('display_name').eq('id', user.id).single()
-        .then(({ data }) => setDisplayName(data?.display_name ?? ''));
+        .then(({ data }) => {
+          setDisplayName(data?.display_name || user.email?.split('@')[0] || 'メンバー');
+        });
     });
   }, []);
 
@@ -121,7 +123,7 @@ export default function MapPage() {
         </div>
       </div>
 
-      {userId && displayName && <LocationTracker userId={userId} displayName={displayName} />}
+      {userId && <LocationTracker userId={userId} displayName={displayName || 'メンバー'} />}
     </div>
   );
 }

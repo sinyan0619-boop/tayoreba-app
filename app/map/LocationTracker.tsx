@@ -8,15 +8,20 @@ export function LocationTracker({ userId, displayName }: { userId: string; displ
     const supabase = createClient()
 
     const send = () => {
-      navigator.geolocation.getCurrentPosition(async (pos) => {
-        await supabase.from('user_locations').upsert({
-          user_id:      userId,
-          display_name: displayName,
-          lat:          pos.coords.latitude,
-          lng:          pos.coords.longitude,
-          updated_at:   new Date().toISOString(),
-        })
-      }, undefined, { timeout: 10000 })
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          const { error } = await supabase.from('user_locations').upsert({
+            user_id:      userId,
+            display_name: displayName,
+            lat:          pos.coords.latitude,
+            lng:          pos.coords.longitude,
+            updated_at:   new Date().toISOString(),
+          })
+          if (error) console.error('[LocationTracker] upsert error:', error)
+        },
+        (err) => console.error('[LocationTracker] geolocation error:', err),
+        { timeout: 10000, enableHighAccuracy: false }
+      )
     }
 
     send()
