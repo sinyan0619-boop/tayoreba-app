@@ -3,14 +3,16 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const navItems = [
-  { href: '/', label: '今日', icon: '🏠' },
-  { href: '/map', label: '地図', icon: '🗺️' },
-  { href: '/cases', label: '案件', icon: '📋' },
-  { href: '/report', label: '日報', icon: '📝' },
+  { href: '/',        label: '今日',       icon: '🏠' },
+  { href: '/map',     label: '地図',       icon: '🗺️' },
+  { href: '/cases',   label: '案件',       icon: '📋' },
+  { href: '/report',  label: '日報',       icon: '📝' },
+  { href: '/account', label: 'アカウント', icon: '👤' },
 ];
 
 export default function BottomNav() {
   const pathname = usePathname();
+  if (pathname === '/login') return null;
 
   return (
     <nav className="flex border-t border-gray-200 bg-white shrink-0">

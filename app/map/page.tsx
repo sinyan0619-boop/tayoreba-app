@@ -4,7 +4,10 @@ import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Header from '@/components/Header';
 import { supabase, dbToCase } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase-browser';
 import { Case, CaseRank, CaseStatus, STATUS_COLORS } from '@/types';
+import { UserLocation } from '@/components/MapView';
+import { LocationTracker } from './LocationTracker';
 
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
 
@@ -13,19 +16,39 @@ const RANKS: CaseRank[]      = ['A', 'B', 'C'];
 
 export default function MapPage() {
   const router = useRouter();
-  const [cases, setCases]           = useState<Case[]>([]);
-  const [loading, setLoading]       = useState(true);
+  const [cases, setCases]                 = useState<Case[]>([]);
+  const [userLocations, setUserLocations] = useState<UserLocation[]>([]);
+  const [userId, setUserId]               = useState<string | null>(null);
+  const [displayName, setDisplayName]     = useState<string>('');
+  const [loading, setLoading]             = useState(true);
   const [selStatuses, setSelStatuses] = useState<Set<CaseStatus>>(new Set());
   const [selRanks, setSelRanks]       = useState<Set<CaseRank>>(new Set());
 
   useEffect(() => {
-    supabase
-      .from('properties')
-      .select('*, visits(*)')
-      .then(({ data }) => {
-        setCases((data ?? []).map(dbToCase));
-        setLoading(false);
-      });
+    supabase.from('properties').select('*, visits(*)').then(({ data }) => {
+      setCases((data ?? []).map(dbToCase));
+      setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    const auth = createClient();
+    auth.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      setUserId(user.id);
+      auth.from('profiles').select('display_name').eq('id', user.id).single()
+        .then(({ data }) => setDisplayName(data?.display_name ?? ''));
+    });
+  }, []);
+
+  useEffect(() => {
+    const fetchLocations = async () => {
+      const { data } = await supabase.from('user_locations').select('*');
+      setUserLocations((data ?? []) as UserLocation[]);
+    };
+    fetchLocations();
+    const timer = setInterval(fetchLocations, 30000);
+    return () => clearInterval(timer);
   }, []);
 
   const toggle = <T,>(set: Set<T>, val: T): Set<T> => {
@@ -36,7 +59,7 @@ export default function MapPage() {
 
   const filtered = cases.filter((c) => {
     if (selStatuses.size > 0 && !selStatuses.has(c.status)) return false;
-    if (selRanks.size > 0 && !selRanks.has(c.rank)) return false;
+    if (selRanks.size > 0    && !selRanks.has(c.rank))    return false;
     return true;
   });
 
@@ -44,57 +67,47 @@ export default function MapPage() {
     <div className="flex flex-col h-full">
       <Header title="地図" />
 
-      {/* フィルター */}
       <div className="bg-white border-b border-gray-200 px-3 pt-2 pb-2 space-y-1.5 shrink-0">
         <div className="flex gap-1.5 flex-wrap">
           {STATUSES.map((s) => (
-            <button
-              key={s}
-              onClick={() => setSelStatuses((p) => toggle(p, s))}
+            <button key={s} onClick={() => setSelStatuses((p) => toggle(p, s))}
               className="px-2.5 py-1 rounded-full text-xs font-medium border transition-all"
-              style={
-                selStatuses.has(s)
-                  ? { backgroundColor: STATUS_COLORS[s], borderColor: STATUS_COLORS[s], color: '#fff' }
-                  : { backgroundColor: '#fff', color: '#555', borderColor: '#ddd' }
-              }
-            >
-              {s}
-            </button>
+              style={selStatuses.has(s)
+                ? { backgroundColor: STATUS_COLORS[s], borderColor: STATUS_COLORS[s], color: '#fff' }
+                : { backgroundColor: '#fff', color: '#555', borderColor: '#ddd' }}
+            >{s}</button>
           ))}
         </div>
         <div className="flex items-center gap-1.5">
           {RANKS.map((r) => (
-            <button
-              key={r}
-              onClick={() => setSelRanks((p) => toggle(p, r))}
+            <button key={r} onClick={() => setSelRanks((p) => toggle(p, r))}
               className={`px-3 py-1 rounded-full text-xs font-bold border transition-all
                 ${selRanks.has(r) ? 'bg-gray-700 text-white border-gray-700' : 'bg-white text-gray-600 border-gray-300'}`}
-            >
-              ランク{r}
-            </button>
+            >ランク{r}</button>
           ))}
-          <span className="ml-auto text-xs text-gray-500">
-            {loading ? '読込中...' : `${filtered.length}件`}
-          </span>
+          <div className="ml-auto flex items-center gap-2 text-xs text-gray-500">
+            <span className="flex items-center gap-1">
+              <span className="w-3 h-3 rounded-full inline-block bg-purple-600" />
+              メンバー {userLocations.length}人
+            </span>
+            <span>{loading ? '読込中...' : `${filtered.length}件`}</span>
+          </div>
         </div>
       </div>
 
-      {/* 地図 */}
       <div className="flex-1 min-h-0">
         {loading ? (
-          <div className="h-full flex items-center justify-center text-gray-400 text-sm">
-            地図を読み込み中...
-          </div>
+          <div className="h-full flex items-center justify-center text-gray-400 text-sm">地図を読み込み中...</div>
         ) : (
           <MapView
             cases={filtered}
+            userLocations={userLocations}
             height="100%"
             onMarkerClick={(id) => router.push(`/case/${id}`)}
           />
         )}
       </div>
 
-      {/* 凡例 */}
       <div className="bg-white border-t border-gray-200 px-3 py-2 flex gap-3 flex-wrap shrink-0">
         {STATUSES.map((s) => (
           <div key={s} className="flex items-center gap-1">
@@ -102,7 +115,13 @@ export default function MapPage() {
             <span className="text-xs text-gray-600">{s}</span>
           </div>
         ))}
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 rounded-full shrink-0 bg-purple-600" />
+          <span className="text-xs text-gray-600">メンバー</span>
+        </div>
       </div>
+
+      {userId && displayName && <LocationTracker userId={userId} displayName={displayName} />}
     </div>
   );
 }
