@@ -1,8 +1,10 @@
 'use client';
 import { useCallback, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import Header from '@/components/Header';
 import { CaseRank, CaseStatus } from '@/types';
+import { addPrefecture } from '@/lib/address';
 
 // ── xlsx パーサー（.xlsx / .xls 直接読込）──────────────────────────
 async function parseXLSX(buffer: ArrayBuffer): Promise<{ headers: string[]; rows: Record<string, string>[] }> {
@@ -13,8 +15,6 @@ async function parseXLSX(buffer: ArrayBuffer): Promise<{ headers: string[]; rows
 
   if (raw.length < 2) return { headers: [], rows: [] };
 
-  // 1行目がタイトル行の場合はスキップ、2行目をヘッダーとして使う
-  // ヘッダー行の判定: '事件番号'/'住所'/'所在地' いずれかを含む行を探す
   let headerIdx = 0;
   for (let i = 0; i < Math.min(raw.length, 5); i++) {
     const row = raw[i].map((v) => String(v ?? ''));
@@ -23,6 +23,7 @@ async function parseXLSX(buffer: ArrayBuffer): Promise<{ headers: string[]; rows
       break;
     }
   }
+
 
   const headers = raw[headerIdx].map((v) =>
     String(v ?? '').replace(/\n/g, '').replace(/\s+/g, ' ').trim()
@@ -35,7 +36,6 @@ async function parseXLSX(buffer: ArrayBuffer): Promise<{ headers: string[]; rows
         return { ...acc, [h]: val };
       }, {})
     )
-    // 全フィールドが空の行を除外
     .filter((row) => Object.values(row).some((v) => v.trim() !== ''));
 
   return { headers, rows };
@@ -87,9 +87,20 @@ const APP_FIELDS = [
   { key: 'rank',       label: 'ランク',    required: false },
   { key: 'assignee',   label: '担当者',    required: false },
   { key: 'caseNumber', label: '事件番号',  required: false },
+  { key: 'haitoDate',  label: '配当要求日',required: false },
   { key: 'notes',      label: '備考',      required: false },
 ] as const;
 type AppFieldKey = (typeof APP_FIELDS)[number]['key'];
+
+function normalizeDate(v: string): string | null {
+  if (!v) return null;
+  const s = v.replace(/\//g, '-').replace(/年/g, '-').replace(/月/g, '-').replace(/日/g, '').trim();
+  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(s)) {
+    const [y, m, d] = s.split('-').map(Number);
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+  return null;
+}
 
 const VALID_STATUSES = new Set<string>(['未訪問', '訪問対象外', '訪問対象', '媒介', '契約']);
 const VALID_RANKS = new Set<string>(['A', 'B', 'C']);
@@ -103,6 +114,7 @@ function autoMap(headers: string[]): Partial<Record<AppFieldKey, string>> {
     ['rank',       ['ランク', 'rank', 'RANK', '優先度']],
     ['assignee',   ['担当者', '担当']],
     ['caseNumber', ['事件番号', '案件番号', '番号', 'No.', 'NO']],
+    ['haitoDate',  ['配当要求日', '配当要求終期', '配当終期', '終期']],
     ['notes',      ['備考', 'メモ', '備考欄', '注記']],
   ];
   const result: Partial<Record<AppFieldKey, string>> = {};
@@ -132,9 +144,9 @@ function validateRow(
 
 // サンプル CSV
 const SAMPLE_CSV =
-  '住所,所有者名,ステータス,ランク,担当者,事件番号,備考\n' +
-  '大阪市住之江区北島3丁目2-8,北島靖章,訪問対象,A,田中,2024-001,要確認\n' +
-  '大阪市東住吉区今川4丁目11-3,田中美佐子,未訪問,B,鈴木,2024-002,\n';
+  '住所,所有者名,ステータス,ランク,担当者,事件番号,配当要求日,備考\n' +
+  '大阪市住之江区北島3丁目2-8,北島靖章,訪問対象,A,田中,2024-001,2026-06-30,要確認\n' +
+  '大阪市東住吉区今川4丁目11-3,田中美佐子,未訪問,B,鈴木,2024-002,,\n';
 
 type Step = 'upload' | 'mapping' | 'preview' | 'result';
 
@@ -146,10 +158,45 @@ export default function ImportPage() {
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [mapping, setMapping] = useState<Partial<Record<AppFieldKey, string>>>({});
-  const [result, setResult] = useState({ success: 0, error: 0 });
+  const [defaultHaitoDate, setDefaultHaitoDate] = useState<string>('');
+  const [dedupeEnabled, setDedupeEnabled] = useState(true);
+  const [result, setResult] = useState({ success: 0, error: 0, updated: 0 });
 
   const processFile = (file: File) => {
+    const isPdf  = /\.pdf$/i.test(file.name);
     const isXlsx = /\.(xlsx|xls)$/i.test(file.name);
+
+    if (isPdf) {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const form = new FormData();
+        form.append('file', file);
+        const res = await fetch('/api/parse-pdf', { method: 'POST', body: form });
+        if (!res.ok) { alert(`PDF解析エラー: ${await res.text()}`); return; }
+        const json = await res.json();
+        if (json.error) { alert(`PDF解析エラー: ${json.error}`); return; }
+
+        const props: { address: string; owner_name: string; case_number?: string; notes?: string }[] =
+          json.properties ?? [];
+        if (props.length === 0) { alert('物件データを抽出できませんでした'); return; }
+
+        // PDFの場合はマッピング不要で直接データをセット
+        const syntheticHeaders = ['address', 'owner_name', 'case_number', 'notes'];
+        const syntheticRows = props.map((p) => ({
+          address:     p.address    ?? '',
+          owner_name:  p.owner_name ?? '',
+          case_number: p.case_number ?? '',
+          notes:       p.notes       ?? '',
+        }));
+        setHeaders(syntheticHeaders);
+        setRows(syntheticRows);
+        setMapping({ address: 'address', ownerName: 'owner_name', caseNumber: 'case_number', notes: 'notes' });
+        if (json.title_date) setDefaultHaitoDate(json.title_date);
+        setStep('preview');
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
 
     if (isXlsx) {
       const reader = new FileReader();
@@ -210,39 +257,106 @@ export default function ImportPage() {
   const handleImport = async () => {
     const validRows = dataRows.filter((_, i) => rowErrors[i].length === 0);
     const batchId = crypto.randomUUID();
-    const toInsert = validRows.map((row) => ({
-      address:         (mapping.address    ? row[mapping.address]    : '') || '',
-      owner_name:      (mapping.ownerName  ? row[mapping.ownerName]  : '') || '',
-      status: (VALID_STATUSES.has(mapping.status ? (row[mapping.status] ?? '') : '')
-        ? row[mapping.status!]
-        : '未訪問') as CaseStatus,
-      rank: (VALID_RANKS.has(mapping.rank ? (row[mapping.rank] ?? '') : '')
-        ? row[mapping.rank!]
-        : 'C') as CaseRank,
-      assignee:        mapping.assignee    ? (row[mapping.assignee]    || null) : null,
-      case_number:     mapping.caseNumber  ? (row[mapping.caseNumber]  || null) : null,
-      notes:           mapping.notes       ? (row[mapping.notes]        || null) : null,
-      import_batch_id: batchId,
-    }));
-
     const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const sbKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-    const res = await fetch(`${sbUrl}/rest/v1/properties`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey':        sbKey,
-        'Authorization': `Bearer ${sbKey}`,
-        'Prefer':        'return=minimal',
-      },
-      body: JSON.stringify(toInsert),
+
+    const buildRecord = (row: Record<string, string>) => ({
+      address:         addPrefecture((mapping.address ? row[mapping.address] : '') || ''),
+      owner_name:      (mapping.ownerName  ? row[mapping.ownerName]  : '') || '',
+      status: (VALID_STATUSES.has(mapping.status ? (row[mapping.status] ?? '') : '')
+        ? row[mapping.status!] : '未訪問') as CaseStatus,
+      rank: (VALID_RANKS.has(mapping.rank ? (row[mapping.rank] ?? '') : '')
+        ? row[mapping.rank!] : 'C') as CaseRank,
+      assignee:        mapping.assignee   ? (row[mapping.assignee]   || null) : null,
+      case_number:     mapping.caseNumber ? (row[mapping.caseNumber] || null) : null,
+      haito_date:      mapping.haitoDate  ? (normalizeDate(row[mapping.haitoDate] ?? '') ?? normalizeDate(defaultHaitoDate)) : normalizeDate(defaultHaitoDate),
+      notes:           mapping.notes      ? (row[mapping.notes]      || null) : null,
+      import_batch_id: batchId,
     });
-    if (!res.ok) {
-      const errBody = await res.text();
-      alert(`インポートに失敗しました: ${res.status} ${errBody}`);
-      return;
+
+    let insertCount = 0;
+    let updateCount = 0;
+
+    if (dedupeEnabled) {
+      // 事件番号を持つ行だけ既存照合
+      const caseNumbers = validRows
+        .map((r) => (mapping.caseNumber ? r[mapping.caseNumber] : ''))
+        .filter(Boolean);
+
+      // 既存レコードを一括取得
+      const existingMap = new Map<string, string>(); // case_number → id
+      if (caseNumbers.length > 0) {
+        const query = caseNumbers.map((n) => encodeURIComponent(n)).join(',');
+        const exRes = await fetch(
+          `${sbUrl}/rest/v1/properties?case_number=in.(${caseNumbers.map((n) => `"${n}"`).join(',')})&select=id,case_number,owner_name,haito_date,notes`,
+          { headers: { 'apikey': sbKey, 'Authorization': `Bearer ${sbKey}` } }
+        );
+        if (exRes.ok) {
+          const existing: { id: string; case_number: string; owner_name: string; haito_date: string | null; notes: string | null }[] = await exRes.json();
+          for (const e of existing) existingMap.set(e.case_number, e.id);
+          void query; // suppress unused warning
+        }
+      }
+
+      const toInsert: ReturnType<typeof buildRecord>[] = [];
+      for (const row of validRows) {
+        const rec = buildRecord(row);
+        const existingId = rec.case_number ? existingMap.get(rec.case_number) : undefined;
+
+        if (existingId) {
+          // 既存レコードを更新（status/rank/assignee は上書きしない）
+          const patch: Record<string, string | null> = {};
+          if (rec.owner_name && rec.owner_name !== '不明') patch.owner_name = rec.owner_name;
+          if (rec.address)    patch.address    = rec.address;
+          if (rec.haito_date) patch.haito_date = rec.haito_date;
+          if (rec.notes)      patch.notes      = rec.notes;
+          if (rec.case_number) patch.case_number = rec.case_number;
+
+          const upRes = await fetch(`${sbUrl}/rest/v1/properties?id=eq.${existingId}`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': sbKey, 'Authorization': `Bearer ${sbKey}`,
+              'Prefer': 'return=minimal',
+            },
+            body: JSON.stringify(patch),
+          });
+          if (upRes.ok) updateCount++;
+        } else {
+          toInsert.push(rec);
+        }
+      }
+
+      if (toInsert.length > 0) {
+        const insRes = await fetch(`${sbUrl}/rest/v1/properties`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': sbKey, 'Authorization': `Bearer ${sbKey}`,
+            'Prefer': 'return=minimal',
+          },
+          body: JSON.stringify(toInsert),
+        });
+        if (!insRes.ok) { alert(`インポートに失敗しました: ${insRes.status} ${await insRes.text()}`); return; }
+        insertCount = toInsert.length;
+      }
+    } else {
+      // 重複チェックなし：全件INSERT
+      const toInsert = validRows.map(buildRecord);
+      const res = await fetch(`${sbUrl}/rest/v1/properties`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': sbKey, 'Authorization': `Bearer ${sbKey}`,
+          'Prefer': 'return=minimal',
+        },
+        body: JSON.stringify(toInsert),
+      });
+      if (!res.ok) { alert(`インポートに失敗しました: ${res.status} ${await res.text()}`); return; }
+      insertCount = toInsert.length;
     }
-    setResult({ success: validCount, error: errorCount });
+
+    setResult({ success: insertCount, updated: updateCount, error: errorCount });
     setStep('result');
   };
 
@@ -274,17 +388,30 @@ export default function ImportPage() {
             >
               <span className="text-4xl mb-3">📂</span>
               <p className="font-semibold text-gray-700 text-sm">
-                ExcelまたはCSVをドロップ
+                ファイルをドロップ
               </p>
-              <p className="text-xs text-gray-400 mt-1">.xlsx / .xls / .csv 対応</p>
+              <p className="text-xs text-gray-400 mt-1">.xlsx / .xls / .csv / .pdf 対応</p>
               <input
                 ref={fileRef}
                 type="file"
-                accept=".xlsx,.xls,.csv,text/csv"
+                accept=".xlsx,.xls,.csv,.pdf,text/csv,application/pdf"
                 className="hidden"
                 onChange={onFileChange}
               />
             </div>
+
+            {/* 写真インポートへのリンク */}
+            <Link
+              href="/import/photo"
+              className="flex items-center gap-3 bg-white rounded-2xl p-4 shadow-sm active:bg-gray-50"
+            >
+              <span className="text-3xl">📷</span>
+              <div>
+                <div className="font-semibold text-gray-700 text-sm">写真から読み取る</div>
+                <div className="text-xs text-gray-400 mt-0.5">書類の写真をAIが自動解析</div>
+              </div>
+              <span className="ml-auto text-gray-400">›</span>
+            </Link>
 
             {/* フォーマット説明 */}
             <div className="bg-white rounded-2xl p-4 shadow-sm space-y-2">
@@ -298,7 +425,7 @@ export default function ImportPage() {
                 </button>
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {['住所', '所有者名', 'ステータス', 'ランク', '担当者', '事件番号', '備考'].map((col) => (
+                {['住所', '所有者名', 'ステータス', 'ランク', '担当者', '事件番号', '配当要求日', '備考'].map((col) => (
                   <span
                     key={col}
                     className="bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded-full"
@@ -356,6 +483,22 @@ export default function ImportPage() {
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* 全件共通の配当日（列にない場合の一括設定） */}
+            <div className="bg-yellow-50 border border-yellow-200 rounded-2xl px-4 py-3 space-y-1.5">
+              <div className="text-xs font-bold text-yellow-800">
+                📅 配当日（全件共通・列マッピングより優先されません）
+              </div>
+              <div className="text-xs text-yellow-700">
+                ファイルに配当日列がない場合、ここで設定した日付が全件に使われます。
+              </div>
+              <input
+                type="date"
+                value={defaultHaitoDate}
+                onChange={(e) => setDefaultHaitoDate(e.target.value)}
+                className="w-full text-sm border border-yellow-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-yellow-500"
+              />
             </div>
 
             <button
@@ -470,6 +613,22 @@ export default function ImportPage() {
               </div>
             </div>
 
+            {/* 重複チェックトグル */}
+            <div
+              className="flex items-center justify-between bg-white rounded-2xl px-4 py-3 shadow-sm cursor-pointer"
+              onClick={() => setDedupeEnabled((v) => !v)}
+            >
+              <div>
+                <div className="text-sm font-medium text-gray-800">重複チェック（事件番号で照合）</div>
+                <div className="text-xs text-gray-400 mt-0.5">
+                  既存の案件は上書き更新、新規のみ追加
+                </div>
+              </div>
+              <div className={`w-11 h-6 rounded-full transition-colors ${dedupeEnabled ? 'bg-blue-500' : 'bg-gray-300'}`}>
+                <div className={`w-5 h-5 bg-white rounded-full shadow mt-0.5 transition-transform ${dedupeEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              </div>
+            </div>
+
             <button
               onClick={handleImport}
               disabled={validCount === 0}
@@ -497,17 +656,23 @@ export default function ImportPage() {
                 インポート完了
               </p>
               <p className="text-gray-500 text-sm mt-1">
-                {result.success}件を追加しました
+                新規{result.success}件追加・{result.updated}件更新
                 {result.error > 0 && `（${result.error}件スキップ）`}
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 w-full">
+            <div className="grid grid-cols-3 gap-3 w-full">
               <div className="bg-white rounded-2xl p-4 text-center shadow-sm">
                 <div className="text-3xl font-bold text-green-600">
                   {result.success}
                 </div>
-                <div className="text-xs text-gray-500 mt-1">成功</div>
+                <div className="text-xs text-gray-500 mt-1">新規追加</div>
+              </div>
+              <div className="bg-white rounded-2xl p-4 text-center shadow-sm">
+                <div className="text-3xl font-bold text-blue-500">
+                  {result.updated}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">更新</div>
               </div>
               <div className="bg-white rounded-2xl p-4 text-center shadow-sm">
                 <div className={`text-3xl font-bold ${result.error > 0 ? 'text-red-500' : 'text-gray-300'}`}>

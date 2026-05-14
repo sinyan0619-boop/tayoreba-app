@@ -15,6 +15,7 @@ export function EditForm({ c }: { c: Case }) {
   const [assignee, setAssignee]     = useState(c.assignee ?? '')
   const [caseNumber, setCaseNumber] = useState(c.caseNumber ?? '')
   const [notes, setNotes]           = useState(c.notes ?? '')
+  const [haitoDate, setHaitoDate]   = useState(c.haitoDate ?? '')
   const [saving, setSaving]         = useState(false)
 
   const handleSave = async () => {
@@ -29,6 +30,7 @@ export function EditForm({ c }: { c: Case }) {
       assignee:     assignee.trim()   || null,
       case_number:  caseNumber.trim() || null,
       notes:        notes.trim()      || null,
+      haito_date:   haitoDate         || null,
     })
   }
 
@@ -62,6 +64,10 @@ export function EditForm({ c }: { c: Case }) {
         <div>
           <label className={labelCls}>残債額（万円）</label>
           <input type="number" value={loanAmount} onChange={(e) => setLoanAmount(e.target.value)} placeholder="例: 1500" className={inputCls} />
+        </div>
+        <div>
+          <label className={labelCls}>配当要求日</label>
+          <input type="date" value={haitoDate} onChange={(e) => setHaitoDate(e.target.value)} className={inputCls} />
         </div>
         <div>
           <label className={labelCls}>備考</label>

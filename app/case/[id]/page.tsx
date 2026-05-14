@@ -3,10 +3,12 @@ import Link from 'next/link';
 import Header from '@/components/Header';
 import { RankBadge } from '@/components/StatusBadge';
 import { supabase, dbToCase } from '@/lib/supabase';
+import { getHaitoKigen, HAITO_KIGEN_COLORS } from '@/types';
 import { DeleteButton } from './DeleteButton';
 import { StatusSelect } from './StatusSelect';
 import { RankSelect } from './RankSelect';
 import { VisitDeleteButton } from './VisitDeleteButton';
+import CaseFiles from '@/components/CaseFiles';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -60,6 +62,24 @@ export default async function CaseDetailPage({ params }: Props) {
 
           <div className="space-y-2 text-sm pt-1">
             <Row label="住所"   value={c.address} />
+            {c.haitoDate && (() => {
+              const kigen = getHaitoKigen(c.haitoDate);
+              return (
+                <Row label="配当要求日" value={
+                  <span className="flex items-center gap-2">
+                    {c.haitoDate}
+                    {kigen && (
+                      <span
+                        className="text-xs px-2 py-0.5 rounded-full text-white font-medium"
+                        style={{ backgroundColor: HAITO_KIGEN_COLORS[kigen] }}
+                      >
+                        {kigen}
+                      </span>
+                    )}
+                  </span>
+                } />
+              );
+            })()}
             {c.phone      && <Row label="電話"     value={<a href={`tel:${c.phone}`} className="text-blue-600 underline">{c.phone}</a>} />}
             {c.caseNumber && <Row label="事件番号" value={c.caseNumber} />}
             {c.bankName   && <Row label="金融機関" value={c.bankName} />}
@@ -97,6 +117,9 @@ export default async function CaseDetailPage({ params }: Props) {
         </Link>
 
         <DeleteButton id={c.id} />
+
+        {/* 資料 */}
+        <CaseFiles propertyId={c.id} />
 
         {/* 訪問履歴タイムライン */}
         <div className="bg-white rounded-2xl overflow-hidden shadow-sm">

@@ -12,6 +12,7 @@ export async function updateProperty(id: string, data: {
   bank_name: string | null
   loan_amount: number | null
   notes: string | null
+  haito_date: string | null
 }) {
   const { error } = await supabase
     .from('properties')

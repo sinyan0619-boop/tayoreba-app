@@ -11,15 +11,12 @@ const JUDGMENTS: { value: VisitResult; label: string; color: string; bg: string 
   { value: '✖', label: '対応不可',    color: '#e74c3c', bg: '#fdedec' },
 ];
 
-const CONTACT_TYPES = ['ドアノック', '電話', '郵便', 'その他'];
-
 export default function RecordPage() {
   const { id }   = useParams<{ id: string }>();
   const router   = useRouter();
 
   const [property, setProperty] = useState<Case | null>(null);
   const [judgment, setJudgment] = useState<VisitResult | null>(null);
-  const [contactType, setContactType] = useState('ドアノック');
   const [summary, setSummary]         = useState('');
   const [nextAction, setNextAction]   = useState('');
   const [nextDate, setNextDate]       = useState('');
@@ -67,7 +64,6 @@ export default function RecordPage() {
 
     const { error } = await supabase.from('visits').insert({
       property_id:  id,
-      contact_type: contactType,
       summary:      summary || null,
       judgment,
       next_action:  nextAction || null,
@@ -85,6 +81,21 @@ export default function RecordPage() {
       .from('properties')
       .update({ updated_at: new Date().toISOString() })
       .eq('id', id);
+
+    // 訪問記録通知（fire-and-forget）
+    const label = JUDGMENTS.find((j) => j.value === judgment)?.label ?? judgment;
+    const lines = [
+      `📍 訪問記録`,
+      `・住所：${property?.address ?? ''}`,
+      property?.caseNumber ? `・案件番号：${property.caseNumber}` : null,
+      `・結果：${label}`,
+      summary ? `・内容：${summary}` : null,
+    ].filter(Boolean).join('\n');
+    fetch('/api/notify-case', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: lines }),
+    }).catch(() => {});
 
     setSaved(true);
     setTimeout(() => router.push(`/case/${id}`), 1000);
@@ -138,25 +149,6 @@ export default function RecordPage() {
                   style={{ color: judgment === j.value ? j.color : '#9ca3af' }}>
                   {j.label}
                 </span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* 接触方法 */}
-        <div>
-          <div className="text-sm font-semibold text-gray-700 mb-2">接触方法</div>
-          <div className="flex gap-2 flex-wrap">
-            {CONTACT_TYPES.map((t) => (
-              <button
-                key={t}
-                onClick={() => setContactType(t)}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all
-                  ${contactType === t
-                    ? 'bg-gray-800 text-white border-gray-800'
-                    : 'bg-white text-gray-600 border-gray-300'}`}
-              >
-                {t}
               </button>
             ))}
           </div>
