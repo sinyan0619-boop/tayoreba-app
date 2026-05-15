@@ -56,7 +56,6 @@ export async function POST() {
     if (!prop.address?.trim()) continue
 
     const fullAddress = addPrefecture(prop.address)
-    // GSI → Nominatim の順で試す
     let coords = await geocodeGSI(fullAddress)
     let source = 'GSI'
     if (!coords) {
@@ -77,7 +76,6 @@ export async function POST() {
         log.push(`✓ [${source}] ${prop.address.slice(0, 20)}`)
       }
     } else {
-      // 変換不可: センチネル値で再試行対象から除外
       await supabase.from('properties').update({ lat: 0, lng: 0 }).eq('id', prop.id)
       log.push(`― 住所不明 ${prop.address.slice(0, 20)}`)
     }

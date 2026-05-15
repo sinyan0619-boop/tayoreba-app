@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { addPrefecture } from '@/lib/address';
+import { autoGeocode } from '@/lib/geocode';
 
 export const runtime    = 'nodejs';
 export const dynamic    = 'force-dynamic';
@@ -259,6 +260,7 @@ export async function POST(req: NextRequest) {
         });
         if (!insertRes.ok) throw new Error(`Supabase insert failed: ${insertRes.status} ${await insertRes.text()}`);
         const inserted: { id: string }[] = await insertRes.json();
+        autoGeocode(3).catch(() => {});
 
         // updated_at を更新してバッチ時刻を記録（修正コマンド用）
         await saveHaitoDate(lineUserId, usedHaitoDate, sbUrl, sbKey);

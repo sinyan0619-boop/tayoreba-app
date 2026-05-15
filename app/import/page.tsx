@@ -358,6 +358,16 @@ export default function ImportPage() {
 
     setResult({ success: insertCount, updated: updateCount, error: errorCount });
     setStep('result');
+
+    // fire-and-forget: 追加分をジオコーディング
+    const runGeocode = async () => {
+      for (let i = 0; i < 20; i++) {
+        const res = await fetch('/api/geocode', { method: 'POST' });
+        const json = await res.json().catch(() => ({}));
+        if (json.done || (json.remaining ?? 0) === 0) break;
+      }
+    };
+    runGeocode().catch(() => {});
   };
 
   return (

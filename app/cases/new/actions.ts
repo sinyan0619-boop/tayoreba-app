@@ -3,6 +3,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { CaseRank, CaseStatus } from '@/types'
+import { autoGeocode } from '@/lib/geocode'
 
 export async function createProperty(data: {
   address: string
@@ -16,6 +17,7 @@ export async function createProperty(data: {
 }) {
   const { error } = await supabase.from('properties').insert(data)
   if (error) throw new Error(error.message)
+  autoGeocode(1).catch(() => {})
   revalidatePath('/cases')
   redirect('/cases')
 }
