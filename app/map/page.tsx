@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import Header from '@/components/Header';
 import { supabase, dbToCase } from '@/lib/supabase';
 import { createClient } from '@/lib/supabase-browser';
-import { Case, CaseRank, CaseStatus, HaitoKigen, STATUS_COLORS, ALL_HAITO_KIGEN, HAITO_KIGEN_COLORS, matchesHaitoKigen } from '@/types';
+import { Case, CaseStatus, HaitoKigen, STATUS_COLORS, ALL_HAITO_KIGEN, matchesHaitoKigen } from '@/types';
 import { UserLocation } from '@/components/MapView';
 import { LocationTracker } from './LocationTracker';
 import { detectPref } from '@/lib/address';
@@ -13,7 +13,8 @@ import { detectPref } from '@/lib/address';
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
 
 const STATUSES: CaseStatus[] = ['未訪問', '訪問対象外', '訪問対象', '媒介', '契約'];
-const RANKS: CaseRank[]      = ['A', 'B', 'C'];
+const PREFS = ['京都', '滋賀', '大阪', '兵庫'];
+const selectCls = 'flex-1 text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:border-blue-400 min-w-0';
 
 function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371000;
@@ -36,9 +37,8 @@ export default function MapPage() {
   const [userId, setUserId]               = useState<string | null>(null);
   const [displayName, setDisplayName]     = useState<string>('');
   const [loading, setLoading]             = useState(true);
-  const [selStatuses, setSelStatuses]     = useState<Set<CaseStatus>>(new Set());
-  const [selRanks, setSelRanks]           = useState<Set<CaseRank>>(new Set());
-  const [selHaitoKigen, setSelHaitoKigen] = useState<Set<HaitoKigen>>(new Set());
+  const [selStatus, setSelStatus]         = useState('');
+  const [selHaitoKigen, setSelHaitoKigen] = useState('');
   const [selPref, setSelPref]             = useState('');
   const [selAssignee, setSelAssignee]     = useState('');
   const [selQ, setSelQ]                   = useState('');
@@ -53,8 +53,8 @@ export default function MapPage() {
     const src = hasUrl
       ? { status: sp.get('status'), haitoKigen: sp.get('haito_kigen'), pref: sp.get('pref'), assignee: sp.get('assignee'), q: sp.get('q') }
       : (() => { try { return JSON.parse(sessionStorage.getItem('tayoreba_case_filter') ?? '{}'); } catch { return {}; } })();
-    if (src.status)     setSelStatuses(new Set([src.status as CaseStatus]));
-    if (src.haitoKigen) setSelHaitoKigen(new Set([src.haitoKigen as HaitoKigen]));
+    if (src.status)     setSelStatus(src.status);
+    if (src.haitoKigen) setSelHaitoKigen(src.haitoKigen);
     if (src.pref)       setSelPref(src.pref);
     if (src.assignee)   setSelAssignee(src.assignee);
     if (src.q)          setSelQ(src.q);
@@ -130,18 +130,13 @@ export default function MapPage() {
     fetchCases();
   };
 
-  const toggle = <T,>(set: Set<T>, val: T): Set<T> => {
-    const next = new Set(set);
-    if (next.has(val)) next.delete(val); else next.add(val);
-    return next;
-  };
+  const assignees = [...new Set(cases.map((c) => c.assignee).filter(Boolean) as string[])].sort();
 
   const filtered = cases.filter((c) => {
-    if (selStatuses.size > 0 && !selStatuses.has(c.status)) return false;
-    if (selRanks.size > 0    && !selRanks.has(c.rank))      return false;
-    if (selHaitoKigen.size > 0 && ![...selHaitoKigen].some(k => matchesHaitoKigen(c.haitoDate, k))) return false;
-    if (selPref     && detectPref(c.address) !== selPref)   return false;
-    if (selAssignee && c.assignee !== selAssignee)           return false;
+    if (selStatus     && c.status !== selStatus)                                 return false;
+    if (selHaitoKigen && !matchesHaitoKigen(c.haitoDate, selHaitoKigen as HaitoKigen)) return false;
+    if (selPref       && detectPref(c.address) !== selPref)                      return false;
+    if (selAssignee   && c.assignee !== selAssignee)                             return false;
     if (selQ) {
       const t = selQ.toLowerCase();
       if (!c.ownerName.toLowerCase().includes(t) && !c.address.toLowerCase().includes(t)) return false;
@@ -164,54 +159,53 @@ export default function MapPage() {
       <Header title="地図" />
 
       {/* Filter bar */}
-      <div className="bg-white border-b border-gray-200 px-3 pt-2 pb-2 space-y-1.5 shrink-0">
-        <div className="flex gap-1.5 flex-wrap">
-          {STATUSES.map((s) => (
-            <button key={s} onClick={() => setSelStatuses((p) => toggle(p, s))}
-              className="px-2.5 py-1 rounded-full text-xs font-medium border transition-all"
-              style={selStatuses.has(s)
-                ? { backgroundColor: STATUS_COLORS[s], borderColor: STATUS_COLORS[s], color: '#fff' }
-                : { backgroundColor: '#fff', color: '#555', borderColor: '#ddd' }}
-            >{s}</button>
-          ))}
+      <div className="bg-white border-b border-gray-100 px-4 py-3 space-y-2 shrink-0">
+        <div className="flex gap-2">
+          <input
+            type="search"
+            value={selQ}
+            onChange={(e) => setSelQ(e.target.value)}
+            placeholder="名前・住所で検索..."
+            className="flex-1 text-sm border border-gray-200 rounded-xl px-4 py-2 bg-white focus:outline-none focus:border-blue-400"
+          />
         </div>
-        <div className="flex gap-1 overflow-x-auto pb-0.5 scrollbar-none">
-          {ALL_HAITO_KIGEN.map((k) => (
-            <button key={k} onClick={() => setSelHaitoKigen((p) => toggle(p, k))}
-              className="px-2 py-0.5 rounded-full text-xs font-medium border shrink-0 transition-all"
-              style={selHaitoKigen.has(k)
-                ? { backgroundColor: HAITO_KIGEN_COLORS[k], borderColor: HAITO_KIGEN_COLORS[k], color: '#fff' }
-                : { backgroundColor: '#fff', color: '#555', borderColor: '#ddd' }}
-            >{k}</button>
-          ))}
+        <div className="flex gap-2">
+          <select value={selStatus} onChange={(e) => setSelStatus(e.target.value)} className={selectCls}>
+            <option value="">ステータス</option>
+            {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select value={selPref} onChange={(e) => setSelPref(e.target.value)} className={selectCls}>
+            <option value="">エリア</option>
+            {PREFS.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          {assignees.length > 0 && (
+            <select value={selAssignee} onChange={(e) => setSelAssignee(e.target.value)} className={selectCls}>
+              <option value="">担当者</option>
+              {assignees.map((a) => <option key={a} value={a}>{a}</option>)}
+            </select>
+          )}
         </div>
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {RANKS.map((r) => (
-            <button key={r} onClick={() => setSelRanks((p) => toggle(p, r))}
-              className={`px-3 py-1 rounded-full text-xs font-bold border transition-all
-                ${selRanks.has(r) ? 'bg-gray-700 text-white border-gray-700' : 'bg-white text-gray-600 border-gray-300'}`}
-            >ランク{r}</button>
-          ))}
-          <div className="ml-auto flex items-center gap-2 text-xs text-gray-500">
+        <div className="flex gap-2 items-center">
+          <select value={selHaitoKigen} onChange={(e) => setSelHaitoKigen(e.target.value)} className={selectCls}>
+            <option value="">配当期限（すべて）</option>
+            {ALL_HAITO_KIGEN.map((k) => <option key={k} value={k}>{k}</option>)}
+          </select>
+          <div className="shrink-0 flex items-center gap-2 text-xs text-gray-500">
             {(ungeocodedCount > 0 || geocoding) && (
               <button
                 onClick={handleGeocode}
                 disabled={geocoding}
-                className="px-2 py-0.5 rounded border border-blue-300 text-blue-600 disabled:opacity-50"
+                className="px-2 py-1 rounded-lg border border-blue-300 text-blue-600 disabled:opacity-50 whitespace-nowrap"
               >
-                {geocoding ? '処理中...' : `地図未配置 ${ungeocodedCount}件`}
+                {geocoding ? '処理中...' : `未配置 ${ungeocodedCount}件`}
               </button>
             )}
-            {geocodeMsg && (
-              <span className="text-xs text-gray-500 max-w-xs truncate" title={geocodeMsg}>{geocodeMsg}</span>
-            )}
-            <span className="flex items-center gap-1">
-              <span className="w-3 h-3 rounded-full inline-block bg-purple-600" />
-              メンバー {userLocations.length}人
-            </span>
-            <span>{loading ? '読込中...' : `${filtered.length}件`}</span>
+            <span className="whitespace-nowrap">{loading ? '読込中...' : `${filtered.length}件`}</span>
           </div>
         </div>
+        {geocodeMsg && (
+          <p className="text-xs text-gray-400 truncate" title={geocodeMsg}>{geocodeMsg}</p>
+        )}
       </div>
 
       {/* Scrollable body: map + nearby list */}
