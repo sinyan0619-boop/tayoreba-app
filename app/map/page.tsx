@@ -227,7 +227,6 @@ export default function MapPage() {
               cases={filtered}
               userLocations={userLocations}
               height="100%"
-              onMarkerClick={(id) => router.push(`/case/${id}`)}
               panTo={currentLocation}
             />
           )}

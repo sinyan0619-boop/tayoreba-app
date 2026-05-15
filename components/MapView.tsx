@@ -71,14 +71,16 @@ export default function MapView({
           weight: 2.5, opacity: 1, fillOpacity: 0.9,
         }).addTo(mapRef.current);
         marker.bindPopup(
-          `<div style="font-size:13px;line-height:1.6;min-width:160px">
-            <strong style="font-size:14px">${c.ownerName}</strong><br/>
-            <span style="color:#666;font-size:11px">${c.address}</span><br/>
-            <span style="color:${color};font-weight:bold">${c.status}</span>
-            &nbsp;/&nbsp;ランク <strong>${c.rank}</strong>
-          </div>`
+          `<a href="/case/${c.id}" style="text-decoration:none;color:inherit;display:block;min-width:160px">
+            <div style="font-size:13px;line-height:1.6">
+              <strong style="font-size:14px">${c.ownerName}</strong><br/>
+              <span style="color:#666;font-size:11px">${c.address}</span><br/>
+              <span style="color:${color};font-weight:bold">${c.status}</span>
+              &nbsp;/&nbsp;ランク <strong>${c.rank}</strong><br/>
+              <span style="color:#3b82f6;font-size:11px;font-weight:bold">詳細を見る →</span>
+            </div>
+          </a>`
         );
-        if (onMarkerClick) marker.on('click', () => onMarkerClick(c.id));
         caseLayerRef.current.push(marker);
       });
     })();
