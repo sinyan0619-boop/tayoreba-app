@@ -1,6 +1,5 @@
 'use client'
 import { useState, useEffect } from 'react'
-import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ALL_HAITO_KIGEN } from '@/types'
 
@@ -76,20 +75,6 @@ export function CasesFilter({ assignees }: { assignees: string[] }) {
           <option value="">配当期限（すべて）</option>
           {ALL_HAITO_KIGEN.map((k) => <option key={k} value={k}>{k}</option>)}
         </select>
-        <Link
-          href={`/map${(() => {
-            const p = new URLSearchParams()
-            if (status)     p.set('status',      status)
-            if (haitoKigen) p.set('haito_kigen', haitoKigen)
-            if (pref)       p.set('pref',        pref)
-            if (assignee)   p.set('assignee',    assignee)
-            if (q)          p.set('q',           q)
-            return p.toString() ? '?' + p.toString() : ''
-          })()}`}
-          className="shrink-0 flex items-center gap-1 text-xs font-medium text-blue-600 border border-blue-200 bg-blue-50 rounded-xl px-3 py-2 active:bg-blue-100"
-        >
-          🗺️ 地図
-        </Link>
       </div>
     </div>
   )
