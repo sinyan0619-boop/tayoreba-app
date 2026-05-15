@@ -21,12 +21,11 @@ export function CasesFilter({ assignees }: { assignees: string[] }) {
   const [inputValue, setInputValue] = useState(q)
   useEffect(() => setInputValue(q), [q])
 
-  // 地図タブに引き継ぐためsessionStorageに保存
   useEffect(() => {
     try {
-      sessionStorage.setItem('tayoreba_case_filter', JSON.stringify({ status, haitoKigen }))
+      sessionStorage.setItem('tayoreba_case_filter', JSON.stringify({ status, haitoKigen, pref, assignee, q }))
     } catch {}
-  }, [status, haitoKigen])
+  }, [status, haitoKigen, pref, assignee, q])
 
   const update = (key: string, val: string) => {
     const params = new URLSearchParams(sp.toString())
@@ -82,6 +81,9 @@ export function CasesFilter({ assignees }: { assignees: string[] }) {
             const p = new URLSearchParams()
             if (status)     p.set('status',      status)
             if (haitoKigen) p.set('haito_kigen', haitoKigen)
+            if (pref)       p.set('pref',        pref)
+            if (assignee)   p.set('assignee',    assignee)
+            if (q)          p.set('q',           q)
             return p.toString() ? '?' + p.toString() : ''
           })()}`}
           className="shrink-0 flex items-center gap-1 text-xs font-medium text-blue-600 border border-blue-200 bg-blue-50 rounded-xl px-3 py-2 active:bg-blue-100"

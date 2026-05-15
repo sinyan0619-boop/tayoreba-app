@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase-browser';
 import { Case, CaseRank, CaseStatus, HaitoKigen, STATUS_COLORS, ALL_HAITO_KIGEN, HAITO_KIGEN_COLORS, matchesHaitoKigen } from '@/types';
 import { UserLocation } from '@/components/MapView';
 import { LocationTracker } from './LocationTracker';
+import { detectPref } from '@/lib/address';
 
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
 
@@ -38,26 +39,25 @@ export default function MapPage() {
   const [selStatuses, setSelStatuses]     = useState<Set<CaseStatus>>(new Set());
   const [selRanks, setSelRanks]           = useState<Set<CaseRank>>(new Set());
   const [selHaitoKigen, setSelHaitoKigen] = useState<Set<HaitoKigen>>(new Set());
+  const [selPref, setSelPref]             = useState('');
+  const [selAssignee, setSelAssignee]     = useState('');
+  const [selQ, setSelQ]                   = useState('');
   const [currentLocation, setCurrentLocation] = useState<[number, number] | null>(null);
   const [locating, setLocating]           = useState(false);
   const [geocoding, setGeocoding]         = useState(false);
   const [geocodeMsg, setGeocodeMsg]       = useState('');
 
-  // 案件タブのフィルターを引き継ぐ（URLパラメーター優先、なければsessionStorage）
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
-    const urlStatus = sp.get('status') as CaseStatus | null;
-    const urlKigen  = sp.get('haito_kigen') as HaitoKigen | null;
-    if (urlStatus || urlKigen) {
-      if (urlStatus) setSelStatuses(new Set([urlStatus]));
-      if (urlKigen)  setSelHaitoKigen(new Set([urlKigen]));
-    } else {
-      try {
-        const saved = JSON.parse(sessionStorage.getItem('tayoreba_case_filter') ?? '{}');
-        if (saved.status)     setSelStatuses(new Set([saved.status as CaseStatus]));
-        if (saved.haitoKigen) setSelHaitoKigen(new Set([saved.haitoKigen as HaitoKigen]));
-      } catch {}
-    }
+    const hasUrl = sp.toString().length > 0;
+    const src = hasUrl
+      ? { status: sp.get('status'), haitoKigen: sp.get('haito_kigen'), pref: sp.get('pref'), assignee: sp.get('assignee'), q: sp.get('q') }
+      : (() => { try { return JSON.parse(sessionStorage.getItem('tayoreba_case_filter') ?? '{}'); } catch { return {}; } })();
+    if (src.status)     setSelStatuses(new Set([src.status as CaseStatus]));
+    if (src.haitoKigen) setSelHaitoKigen(new Set([src.haitoKigen as HaitoKigen]));
+    if (src.pref)       setSelPref(src.pref);
+    if (src.assignee)   setSelAssignee(src.assignee);
+    if (src.q)          setSelQ(src.q);
   }, []);
 
   const fetchCases = useCallback(async () => {
@@ -138,8 +138,14 @@ export default function MapPage() {
 
   const filtered = cases.filter((c) => {
     if (selStatuses.size > 0 && !selStatuses.has(c.status)) return false;
-    if (selRanks.size > 0    && !selRanks.has(c.rank))    return false;
+    if (selRanks.size > 0    && !selRanks.has(c.rank))      return false;
     if (selHaitoKigen.size > 0 && ![...selHaitoKigen].some(k => matchesHaitoKigen(c.haitoDate, k))) return false;
+    if (selPref     && detectPref(c.address) !== selPref)   return false;
+    if (selAssignee && c.assignee !== selAssignee)           return false;
+    if (selQ) {
+      const t = selQ.toLowerCase();
+      if (!c.ownerName.toLowerCase().includes(t) && !c.address.toLowerCase().includes(t)) return false;
+    }
     return true;
   });
 

@@ -61,6 +61,13 @@ const PREFS = [
   '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県',
 ];
 
+export function detectPref(address: string): string {
+  if (address.includes('大阪')) return '大阪'
+  if (/滋賀県|大津市|草津市|彦根市|長浜市|守山市|栗東市|甲賀市|野洲市|湖南市|高島市|東近江市|米原市/.test(address)) return '滋賀'
+  if (/兵庫県|神戸市|姫路市|尼崎市|明石市|西宮市|芦屋市|伊丹市|宝塚市|川西市|三田市|加古川市|高砂市|西脇市|小野市|加西市|丹波市|丹波篠山市|養父市|朝来市|宍粟市|加東市|たつの市|赤穂市|相生市|豊岡市|南あわじ市|淡路市|洲本市|三木市/.test(address)) return '兵庫'
+  return '京都'
+}
+
 export function addPrefecture(address: string): string {
   if (!address) return address;
   const trimmed = address.trim();

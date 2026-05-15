@@ -4,19 +4,30 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 
-const navItems = [
-  { href: '/map',   label: '地図', icon: '🗺️' },
-  { href: '/cases', label: '案件', icon: '📋' },
-];
+function buildMapHref(): string {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem('tayoreba_case_filter') ?? '{}');
+    const p = new URLSearchParams();
+    if (saved.status)     p.set('status',      saved.status);
+    if (saved.haitoKigen) p.set('haito_kigen', saved.haitoKigen);
+    if (saved.pref)       p.set('pref',        saved.pref);
+    if (saved.assignee)   p.set('assignee',    saved.assignee);
+    if (saved.q)          p.set('q',           saved.q);
+    return p.toString() ? `/map?${p.toString()}` : '/map';
+  } catch { return '/map'; }
+}
 
 export default function BottomNav() {
   const pathname = usePathname();
   const [urgentCount, setUrgentCount] = useState(0);
+  const [mapHref, setMapHref] = useState('/map');
+
+  useEffect(() => {
+    setMapHref(buildMapHref());
+  }, [pathname]);
 
   useEffect(() => {
     const client = createClient();
-    // タイムリミット = haito_date + 3ヶ月。その1週間前にアラート
-    // → haito_date が (今日-3ヶ月) 〜 (今日-3ヶ月+7日) の範囲
     const base = new Date();
     base.setMonth(base.getMonth() - 3);
     const rangeStart = base.toISOString().split('T')[0];
@@ -31,17 +42,19 @@ export default function BottomNav() {
 
   if (pathname === '/login') return null;
 
+  const items = [
+    { href: mapHref,  base: '/map',   label: '地図', icon: '🗺️' },
+    { href: '/cases', base: '/cases', label: '案件', icon: '📋' },
+  ];
+
   return (
     <nav className="flex border-t border-gray-200 bg-white shrink-0">
-      {navItems.map(({ href, label, icon }) => {
-        const isActive =
-          href === '/'
-            ? pathname === '/'
-            : pathname.startsWith(href);
-        const showBadge = href === '/cases' && urgentCount > 0;
+      {items.map(({ href, base, label, icon }) => {
+        const isActive = pathname.startsWith(base);
+        const showBadge = base === '/cases' && urgentCount > 0;
         return (
           <Link
-            key={href}
+            key={base}
             href={href}
             className={`flex-1 flex flex-col items-center justify-center py-2 text-xs transition-colors
               ${isActive ? 'text-blue-600' : 'text-gray-500'}`}
