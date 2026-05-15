@@ -14,6 +14,7 @@ const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
 
 const STATUSES: CaseStatus[] = ['未訪問', '訪問対象外', '訪問対象', '媒介', '契約'];
 const PREFS = ['京都', '滋賀', '大阪', '兵庫'];
+const RANKS = ['A', 'B', 'C'];
 const selectCls = 'flex-1 text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:border-blue-400 min-w-0';
 
 function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -61,6 +62,15 @@ export default function MapPage() {
     if (src.q)          setSelQ(src.q);
     if (src.rank)       setSelRank(src.rank);
   }, []);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('tayoreba_case_filter', JSON.stringify({
+        status: selStatus, haitoKigen: selHaitoKigen, pref: selPref,
+        assignee: selAssignee, q: selQ, rank: selRank,
+      }));
+    } catch {}
+  }, [selStatus, selHaitoKigen, selPref, selAssignee, selQ, selRank]);
 
   const fetchCases = useCallback(async () => {
     const { data } = await supabase.from('properties').select('*, visits(*)');
@@ -192,6 +202,10 @@ export default function MapPage() {
           <select value={selHaitoKigen} onChange={(e) => setSelHaitoKigen(e.target.value)} className={selectCls}>
             <option value="">配当期限（すべて）</option>
             {ALL_HAITO_KIGEN.map((k) => <option key={k} value={k}>{k}</option>)}
+          </select>
+          <select value={selRank} onChange={(e) => setSelRank(e.target.value)} className={selectCls}>
+            <option value="">ランク</option>
+            {RANKS.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
           <div className="shrink-0 flex items-center gap-2 text-xs text-gray-500">
             {(ungeocodedCount > 0 || geocoding) && (

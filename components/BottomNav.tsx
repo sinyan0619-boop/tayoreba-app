@@ -1,6 +1,5 @@
 'use client';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 
@@ -20,14 +19,8 @@ function buildHrefFromFilter(base: string): string {
 
 export default function BottomNav() {
   const pathname = usePathname();
+  const router   = useRouter();
   const [urgentCount, setUrgentCount] = useState(0);
-  const [mapHref, setMapHref]     = useState('/map');
-  const [casesHref, setCasesHref] = useState('/cases');
-
-  useEffect(() => {
-    setMapHref(buildHrefFromFilter('/map'));
-    setCasesHref(buildHrefFromFilter('/cases'));
-  }, [pathname]);
 
   useEffect(() => {
     const client = createClient();
@@ -46,19 +39,19 @@ export default function BottomNav() {
   if (pathname === '/login') return null;
 
   const items = [
-    { href: mapHref,   base: '/map',   label: '地図', icon: '🗺️' },
-    { href: casesHref, base: '/cases', label: '案件', icon: '📋' },
+    { base: '/map',   label: '地図', icon: '🗺️' },
+    { base: '/cases', label: '案件', icon: '📋' },
   ];
 
   return (
     <nav className="flex border-t border-gray-200 bg-white shrink-0">
-      {items.map(({ href, base, label, icon }) => {
-        const isActive = pathname.startsWith(base);
+      {items.map(({ base, label, icon }) => {
+        const isActive  = pathname.startsWith(base);
         const showBadge = base === '/cases' && urgentCount > 0;
         return (
-          <Link
+          <button
             key={base}
-            href={href}
+            onClick={() => router.push(buildHrefFromFilter(base))}
             className={`flex-1 flex flex-col items-center justify-center py-2 text-xs transition-colors
               ${isActive ? 'text-blue-600' : 'text-gray-500'}`}
           >
@@ -71,7 +64,7 @@ export default function BottomNav() {
               )}
             </span>
             <span>{label}</span>
-          </Link>
+          </button>
         );
       })}
     </nav>
