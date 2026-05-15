@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 
-function buildMapHref(): string {
+function buildHrefFromFilter(base: string): string {
   try {
     const saved = JSON.parse(sessionStorage.getItem('tayoreba_case_filter') ?? '{}');
     const p = new URLSearchParams();
@@ -13,17 +13,19 @@ function buildMapHref(): string {
     if (saved.pref)       p.set('pref',        saved.pref);
     if (saved.assignee)   p.set('assignee',    saved.assignee);
     if (saved.q)          p.set('q',           saved.q);
-    return p.toString() ? `/map?${p.toString()}` : '/map';
-  } catch { return '/map'; }
+    return p.toString() ? `${base}?${p.toString()}` : base;
+  } catch { return base; }
 }
 
 export default function BottomNav() {
   const pathname = usePathname();
   const [urgentCount, setUrgentCount] = useState(0);
-  const [mapHref, setMapHref] = useState('/map');
+  const [mapHref, setMapHref]     = useState('/map');
+  const [casesHref, setCasesHref] = useState('/cases');
 
   useEffect(() => {
-    setMapHref(buildMapHref());
+    setMapHref(buildHrefFromFilter('/map'));
+    setCasesHref(buildHrefFromFilter('/cases'));
   }, [pathname]);
 
   useEffect(() => {
@@ -43,8 +45,8 @@ export default function BottomNav() {
   if (pathname === '/login') return null;
 
   const items = [
-    { href: mapHref,  base: '/map',   label: '地図', icon: '🗺️' },
-    { href: '/cases', base: '/cases', label: '案件', icon: '📋' },
+    { href: mapHref,   base: '/map',   label: '地図', icon: '🗺️' },
+    { href: casesHref, base: '/cases', label: '案件', icon: '📋' },
   ];
 
   return (
