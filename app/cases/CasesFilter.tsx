@@ -5,6 +5,7 @@ import { ALL_HAITO_KIGEN } from '@/types'
 
 const STATUSES = ['未訪問', '訪問対象外', '訪問対象', '媒介', '契約']
 const PREFS    = ['京都', '滋賀', '大阪', '兵庫']
+const RANKS    = ['A', 'B', 'C']
 
 const selectCls = 'flex-1 text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:border-blue-400 min-w-0'
 
@@ -16,15 +17,16 @@ export function CasesFilter({ assignees }: { assignees: string[] }) {
   const pref       = sp.get('pref')        ?? ''
   const assignee   = sp.get('assignee')    ?? ''
   const haitoKigen = sp.get('haito_kigen') ?? ''
+  const rank       = sp.get('rank')        ?? ''
 
   const [inputValue, setInputValue] = useState(q)
   useEffect(() => setInputValue(q), [q])
 
   useEffect(() => {
     try {
-      sessionStorage.setItem('tayoreba_case_filter', JSON.stringify({ status, haitoKigen, pref, assignee, q }))
+      sessionStorage.setItem('tayoreba_case_filter', JSON.stringify({ status, haitoKigen, pref, assignee, q, rank }))
     } catch {}
-  }, [status, haitoKigen, pref, assignee, q])
+  }, [status, haitoKigen, pref, assignee, q, rank])
 
   const update = (key: string, val: string) => {
     const params = new URLSearchParams(sp.toString())
@@ -74,6 +76,10 @@ export function CasesFilter({ assignees }: { assignees: string[] }) {
         <select value={haitoKigen} onChange={(e) => update('haito_kigen', e.target.value)} className={selectCls}>
           <option value="">配当期限（すべて）</option>
           {ALL_HAITO_KIGEN.map((k) => <option key={k} value={k}>{k}</option>)}
+        </select>
+        <select value={rank} onChange={(e) => update('rank', e.target.value)} className={selectCls}>
+          <option value="">ランク</option>
+          {RANKS.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
       </div>
     </div>

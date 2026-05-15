@@ -13,6 +13,7 @@ function buildHrefFromFilter(base: string): string {
     if (saved.pref)       p.set('pref',        saved.pref);
     if (saved.assignee)   p.set('assignee',    saved.assignee);
     if (saved.q)          p.set('q',           saved.q);
+    if (saved.rank)       p.set('rank',        saved.rank);
     return p.toString() ? `${base}?${p.toString()}` : base;
   } catch { return base; }
 }

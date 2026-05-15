@@ -10,11 +10,11 @@ import { detectPref } from '@/lib/address';
 export const revalidate = 0;
 
 interface Props {
-  searchParams: Promise<{ status?: string; pref?: string; assignee?: string; q?: string; haito_kigen?: string }>
+  searchParams: Promise<{ status?: string; pref?: string; assignee?: string; q?: string; haito_kigen?: string; rank?: string }>
 }
 
 export default async function CasesPage({ searchParams }: Props) {
-  const { status, pref, assignee, q, haito_kigen } = await searchParams
+  const { status, pref, assignee, q, haito_kigen, rank } = await searchParams
 
   // タイムリミット = haito_date + 3ヶ月。その1週間前にアラート
   const base = new Date();
@@ -43,6 +43,7 @@ export default async function CasesPage({ searchParams }: Props) {
   const urgentCases = urgentResult.data ?? []
   let cases = (data ?? []).map(dbToCase)
 
+  if (rank)        cases = cases.filter((c) => c.rank === rank)
   if (pref)        cases = cases.filter((c) => detectPref(c.address) === pref)
   if (assignee)    cases = cases.filter((c) => c.assignee === assignee)
   if (haito_kigen) cases = cases.filter((c) => matchesHaitoKigen(c.haitoDate, haito_kigen as HaitoKigen))

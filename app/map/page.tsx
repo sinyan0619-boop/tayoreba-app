@@ -42,6 +42,7 @@ export default function MapPage() {
   const [selPref, setSelPref]             = useState('');
   const [selAssignee, setSelAssignee]     = useState('');
   const [selQ, setSelQ]                   = useState('');
+  const [selRank, setSelRank]             = useState('');
   const [currentLocation, setCurrentLocation] = useState<[number, number] | null>(null);
   const [locating, setLocating]           = useState(false);
   const [geocoding, setGeocoding]         = useState(false);
@@ -58,6 +59,7 @@ export default function MapPage() {
     if (src.pref)       setSelPref(src.pref);
     if (src.assignee)   setSelAssignee(src.assignee);
     if (src.q)          setSelQ(src.q);
+    if (src.rank)       setSelRank(src.rank);
   }, []);
 
   const fetchCases = useCallback(async () => {
@@ -135,6 +137,7 @@ export default function MapPage() {
   const filtered = cases.filter((c) => {
     if (selStatus     && c.status !== selStatus)                                 return false;
     if (selHaitoKigen && !matchesHaitoKigen(c.haitoDate, selHaitoKigen as HaitoKigen)) return false;
+    if (selRank       && c.rank !== selRank)                                     return false;
     if (selPref       && detectPref(c.address) !== selPref)                      return false;
     if (selAssignee   && c.assignee !== selAssignee)                             return false;
     if (selQ) {
