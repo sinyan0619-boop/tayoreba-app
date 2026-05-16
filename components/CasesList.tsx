@@ -3,14 +3,14 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Case, getHaitoKigen, HAITO_KIGEN_COLORS } from '@/types';
 import { RankBadge, StatusBadge } from '@/components/StatusBadge';
-import { createClient } from '@/lib/supabase-browser';
+import { useFavorites } from '@/contexts/FavoritesContext';
 
 const LS_KEY = 'tayoreba_last_seen';
 
 export default function CasesList({ cases }: { cases: Case[] }) {
-  const [lastSeen, setLastSeen]       = useState<string | null>(null);
-  const [favorites, setFavorites]     = useState<Set<string>>(new Set());
-  const [favOnly, setFavOnly]         = useState(false);
+  const [lastSeen, setLastSeen] = useState<string | null>(null);
+  const [favOnly, setFavOnly]   = useState(false);
+  const { favorites, isFav }    = useFavorites();
 
   useEffect(() => {
     const prev = localStorage.getItem(LS_KEY);
@@ -21,23 +21,6 @@ export default function CasesList({ cases }: { cases: Case[] }) {
     return () => clearTimeout(t);
   }, []);
 
-  useEffect(() => {
-    const client = createClient();
-    const fetchFavs = async () => {
-      const { data: { user } } = await client.auth.getUser();
-      if (!user) return;
-      const { data } = await client
-        .from('user_favorites')
-        .select('property_id')
-        .eq('user_id', user.id);
-      setFavorites(new Set((data ?? []).map((r) => r.property_id)));
-    };
-    fetchFavs();
-    // ページに戻ったとき（visibility変化）に再取得
-    const onVisible = () => { if (document.visibilityState === 'visible') fetchFavs(); };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, []);
 
   const isNew = (c: Case) => {
     if (!lastSeen || !c.updatedAt) return false;
@@ -81,7 +64,7 @@ export default function CasesList({ cases }: { cases: Case[] }) {
             <div className="ml-3 flex-1 min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="font-medium text-gray-900">{c.ownerName}</span>
-                {favorites.has(c.id) && (
+                {isFav(c.id) && (
                   <span className="text-amber-400 text-xs leading-none">★</span>
                 )}
                 {isNew(c) && (
