@@ -9,6 +9,7 @@ import { StatusSelect } from './StatusSelect';
 import { RankSelect } from './RankSelect';
 import { VisitDeleteButton } from './VisitDeleteButton';
 import CaseFiles from '@/components/CaseFiles';
+import FavoriteButton from '@/components/FavoriteButton';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -116,6 +117,7 @@ export default async function CaseDetailPage({ params }: Props) {
           <span>✏️</span> 訪問記録を入力
         </Link>
 
+        <FavoriteButton propertyId={c.id} />
         <DeleteButton id={c.id} />
 
         {/* 資料 */}
