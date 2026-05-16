@@ -23,16 +23,20 @@ export default function CasesList({ cases }: { cases: Case[] }) {
 
   useEffect(() => {
     const client = createClient();
-    client.auth.getUser().then(({ data: { user } }) => {
+    const fetchFavs = async () => {
+      const { data: { user } } = await client.auth.getUser();
       if (!user) return;
-      client
+      const { data } = await client
         .from('user_favorites')
         .select('property_id')
-        .eq('user_id', user.id)
-        .then(({ data }) => {
-          setFavorites(new Set((data ?? []).map((r) => r.property_id)));
-        });
-    });
+        .eq('user_id', user.id);
+      setFavorites(new Set((data ?? []).map((r) => r.property_id)));
+    };
+    fetchFavs();
+    // ページに戻ったとき（visibility変化）に再取得
+    const onVisible = () => { if (document.visibilityState === 'visible') fetchFavs(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
 
   const isNew = (c: Case) => {
