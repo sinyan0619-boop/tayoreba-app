@@ -152,9 +152,9 @@ export default async function CaseDetailPage({ params }: Props) {
                           {RESULT_LABEL[v.result]}
                         </span>
                       )}
-                      {v.contact_type && (
+                      {v.recorded_by && (
                         <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
-                          {v.contact_type}
+                          👤 {v.recorded_by}
                         </span>
                       )}
                     </div>

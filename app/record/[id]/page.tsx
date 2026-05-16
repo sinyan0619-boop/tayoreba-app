@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import { supabase, dbToCase } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase-browser';
 import { Case, VisitResult } from '@/types';
 
 const JUDGMENTS: { value: VisitResult; label: string; color: string; bg: string }[] = [
@@ -15,8 +16,9 @@ export default function RecordPage() {
   const { id }   = useParams<{ id: string }>();
   const router   = useRouter();
 
-  const [property, setProperty] = useState<Case | null>(null);
-  const [judgment, setJudgment] = useState<VisitResult | null>(null);
+  const [property, setProperty]       = useState<Case | null>(null);
+  const [displayName, setDisplayName] = useState('');
+  const [judgment, setJudgment]       = useState<VisitResult | null>(null);
   const [summary, setSummary]         = useState('');
   const [nextAction, setNextAction]   = useState('');
   const [nextDate, setNextDate]       = useState('');
@@ -35,6 +37,15 @@ export default function RecordPage() {
       .then(({ data }) => {
         if (data) setProperty(dbToCase(data));
       });
+
+    const auth = createClient();
+    auth.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      auth.from('profiles').select('display_name').eq('id', user.id).single()
+        .then(({ data }) => {
+          setDisplayName(data?.display_name || user.email?.split('@')[0] || '');
+        });
+    });
   }, [id]);
 
   const startVoice = () => {
@@ -69,6 +80,7 @@ export default function RecordPage() {
       next_action:  nextAction || null,
       next_date:    nextDate   || null,
       requests:     requests   || null,
+      recorded_by:  displayName || null,
     });
 
     if (error) {
@@ -82,10 +94,10 @@ export default function RecordPage() {
       .update({ updated_at: new Date().toISOString() })
       .eq('id', id);
 
-    // 訪問記録通知（fire-and-forget）
     const label = JUDGMENTS.find((j) => j.value === judgment)?.label ?? judgment;
     const lines = [
       `📍 訪問記録`,
+      displayName ? `・担当：${displayName}` : null,
       `・住所：${property?.address ?? ''}`,
       property?.caseNumber ? `・案件番号：${property.caseNumber}` : null,
       `・結果：${label}`,
@@ -122,6 +134,9 @@ export default function RecordPage() {
           <div className="text-xs text-gray-500 mb-0.5">訪問先</div>
           <div className="font-bold text-gray-900">{property.ownerName}</div>
           <div className="text-xs text-gray-500 mt-0.5 truncate">{property.address}</div>
+          {displayName && (
+            <div className="text-xs text-gray-400 mt-1">👤 {displayName}</div>
+          )}
         </div>
 
         {/* 目処（○△✖） */}

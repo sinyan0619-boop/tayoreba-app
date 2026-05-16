@@ -24,6 +24,7 @@ export function dbToVisit(v: Record<string, any>): Visit {
     next_action:  v.next_action  ?? undefined,
     next_date:    v.next_date    ?? undefined,
     requests:     v.requests     ?? undefined,
+    recorded_by:  v.recorded_by  ?? undefined,
     created_at:   v.created_at,
     // UIで使う aliases
     date:   v.created_at ? (v.created_at as string).split('T')[0] : '',

@@ -82,6 +82,7 @@ export interface Visit {
   next_action?: string;
   next_date?: string;
   requests?: string;
+  recorded_by?: string;
   created_at?: string;
   // UIで使うエイリアス（dbToVisitで付与）
   date: string;
