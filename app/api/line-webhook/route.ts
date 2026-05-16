@@ -237,37 +237,76 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        const toInsert = properties
-          .filter((p) => p.address)
-          .map((p) => ({
-            address:     addPrefecture(p.address),
-            owner_name:  p.owner_name  || '不明',
-            case_number: p.case_number ?? null,
-            haito_date:  p.haito_date  ?? usedHaitoDate,
-            notes:       p.notes       ?? null,
-            status:      '未訪問',
-            rank:        'C',
-          }));
+        const valid = properties.filter((p) => p.address);
 
-        const insertRes = await fetch(`${sbUrl}/rest/v1/properties`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': sbKey, 'Authorization': `Bearer ${sbKey}`,
-            'Prefer': 'return=representation',
-          },
-          body: JSON.stringify(toInsert),
-        });
-        if (!insertRes.ok) throw new Error(`Supabase insert failed: ${insertRes.status} ${await insertRes.text()}`);
-        const inserted: { id: string }[] = await insertRes.json();
+        // 重複チェック: case_number がある物件は既存レコードを検索
+        const caseNumbers = valid.map((p) => p.case_number).filter(Boolean) as string[];
+        let existingMap: Record<string, string> = {}; // case_number → id
+        if (caseNumbers.length > 0) {
+          const filter = caseNumbers.map((n) => `case_number.eq.${encodeURIComponent(n)}`).join(',');
+          const existRes = await fetch(
+            `${sbUrl}/rest/v1/properties?or=(${filter})&select=id,case_number`,
+            { headers: { 'apikey': sbKey, 'Authorization': `Bearer ${sbKey}` } }
+          );
+          if (existRes.ok) {
+            const rows: { id: string; case_number: string }[] = await existRes.json();
+            rows.forEach((r) => { existingMap[r.case_number] = r.id; });
+          }
+        }
+
+        const toInsert: object[] = [];
+        let updateCount = 0;
+
+        for (const p of valid) {
+          const mapped = {
+            address:     addPrefecture(p.address),
+            owner_name:  p.owner_name || '不明',
+            case_number: p.case_number ?? null,
+            haito_date:  p.haito_date ?? usedHaitoDate,
+            notes:       p.notes ?? null,
+          };
+
+          const existingId = p.case_number ? existingMap[p.case_number] : undefined;
+          if (existingId) {
+            // 既存レコードを更新（ステータス・ランク・担当者は保持）
+            await fetch(`${sbUrl}/rest/v1/properties?id=eq.${existingId}`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'apikey': sbKey, 'Authorization': `Bearer ${sbKey}`,
+              },
+              body: JSON.stringify({ ...mapped, updated_at: new Date().toISOString() }),
+            });
+            updateCount++;
+          } else {
+            toInsert.push({ ...mapped, status: '未訪問', rank: 'C' });
+          }
+        }
+
+        let insertedCount = 0;
+        if (toInsert.length > 0) {
+          const insertRes = await fetch(`${sbUrl}/rest/v1/properties`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': sbKey, 'Authorization': `Bearer ${sbKey}`,
+              'Prefer': 'return=representation',
+            },
+            body: JSON.stringify(toInsert),
+          });
+          if (!insertRes.ok) throw new Error(`Supabase insert failed: ${insertRes.status} ${await insertRes.text()}`);
+          const inserted: { id: string }[] = await insertRes.json();
+          insertedCount = inserted.length;
+        }
         autoGeocode(3).catch(() => {});
 
         // updated_at を更新してバッチ時刻を記録（修正コマンド用）
         await saveHaitoDate(lineUserId, usedHaitoDate, sbUrl, sbKey);
 
         const dateLabel = ctx ? `${usedHaitoDate}（設定済み）` : `${usedHaitoDate}（送信日）`;
+        const summary = [insertedCount > 0 ? `新規${insertedCount}件` : null, updateCount > 0 ? `更新${updateCount}件` : null].filter(Boolean).join('・') || '変更なし';
         const lines = [
-          `✅ ${inserted.length}件を登録しました`,
+          `✅ ${summary}`,
           `📅 配当日：${dateLabel}`,
           '',
           ...properties.slice(0, 5).map((p) => [
