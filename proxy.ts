@@ -23,19 +23,15 @@ export async function proxy(request: NextRequest) {
   )
 
   const { data: { session } } = await supabase.auth.getSession()
-  const isLoginPage = request.nextUrl.pathname.startsWith('/login')
-  const isResetPage = request.nextUrl.pathname.startsWith('/reset-password')
 
-  if (!session && !isLoginPage && !isResetPage) {
+  if (!session) {
     return NextResponse.redirect(new URL('/login', request.url))
-  }
-  if (session && isLoginPage) {
-    return NextResponse.redirect(new URL('/', request.url))
   }
 
   return response
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon\\.ico|manifest\\.json|sw\\.js|icons|api).*)'],
+  // login と reset-password は matcher から外して CDN 直配信（コールドスタート回避）
+  matcher: ['/((?!_next/static|_next/image|favicon\\.ico|manifest\\.json|sw\\.js|icons|api|login|reset-password).*)'],
 }

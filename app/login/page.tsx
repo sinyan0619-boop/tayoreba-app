@@ -1,11 +1,20 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase-browser'
 import { signIn, signUp, sendPasswordReset } from './actions'
 
 const inputCls = 'w-full rounded-xl border border-gray-200 px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100'
 
 export default function LoginPage() {
+  const router = useRouter()
   const [mode, setMode] = useState<'login' | 'signup' | 'reset'>('login')
+
+  useEffect(() => {
+    createClient().auth.getSession().then(({ data: { session } }) => {
+      if (session) router.replace('/')
+    })
+  }, [router])
   const [email, setEmail]           = useState('')
   const [password, setPassword]     = useState('')
   const [displayName, setDisplayName] = useState('')
