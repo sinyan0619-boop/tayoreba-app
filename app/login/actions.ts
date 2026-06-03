@@ -21,3 +21,20 @@ export async function signUp(email: string, password: string, displayName: strin
   revalidatePath('/', 'layout')
   redirect('/')
 }
+
+export async function sendPasswordReset(email: string): Promise<string | null> {
+  const supabase = await createClient()
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: 'https://tayoreba-app.vercel.app/reset-password',
+  })
+  if (error) return error.message
+  return null
+}
+
+export async function updatePassword(password: string): Promise<string | null> {
+  const supabase = await createClient()
+  const { error } = await supabase.auth.updateUser({ password })
+  if (error) return error.message
+  revalidatePath('/', 'layout')
+  redirect('/')
+}
