@@ -79,8 +79,7 @@ export default async function TodayPage() {
     .from('properties')
     .select('*, visits(*)')
     .in('status', ['未訪問', '訪問対象', '媒介'])
-    .order('rank', { ascending: true })
-    .order('created_at', { referencedTable: 'visits', ascending: false });
+    .order('rank', { ascending: true });
 
   const allCases = (data ?? []).map(dbToCase);
 

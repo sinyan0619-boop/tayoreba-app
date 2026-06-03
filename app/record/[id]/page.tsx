@@ -39,11 +39,11 @@ export default function RecordPage() {
       });
 
     const auth = createClient();
-    auth.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return;
-      auth.from('profiles').select('display_name').eq('id', user.id).single()
+    auth.auth.getSession().then(({ data: { session } }) => {
+      if (!session?.user) return;
+      auth.from('profiles').select('display_name').eq('id', session.user.id).single()
         .then(({ data }) => {
-          setDisplayName(data?.display_name || user.email?.split('@')[0] || '');
+          setDisplayName(data?.display_name || session.user.email?.split('@')[0] || '');
         });
     });
   }, [id]);

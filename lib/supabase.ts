@@ -6,7 +6,12 @@ const url  = process.env.NEXT_PUBLIC_SUPABASE_URL  ?? 'https://placeholder.supab
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? 'placeholder-anon-key';
 
 // クライアント / サーバー共用（anon key）
-export const supabase = createClient(url, anon);
+export const supabase = createClient(url, anon, {
+  global: {
+    fetch: (input, init) =>
+      fetch(input, { ...init, signal: AbortSignal.timeout(10000) }),
+  },
+});
 
 // サーバー専用（service role key — API routeのみで使用）
 export function createAdminClient() {
@@ -51,6 +56,10 @@ export function dbToCase(p: Record<string, any>): Case {
     caseNumber: p.case_number ?? undefined,
     notes:      p.notes      ?? undefined,
     updatedAt:  p.updated_at ?? undefined,
-    visits:     Array.isArray(p.visits) ? p.visits.map(dbToVisit) : [],
+    visits:     Array.isArray(p.visits)
+      ? [...p.visits]
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .map(dbToVisit)
+      : [],
   };
 }

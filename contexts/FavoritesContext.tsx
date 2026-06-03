@@ -29,10 +29,10 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const client = createClient();
-    client.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return;
-      setUserId(user.id);
-      fetchFavs(user.id);
+    client.auth.getSession().then(({ data: { session } }) => {
+      if (!session?.user) return;
+      setUserId(session.user.id);
+      fetchFavs(session.user.id);
     });
   }, [fetchFavs]);
 
