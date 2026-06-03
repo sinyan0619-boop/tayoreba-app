@@ -4,7 +4,7 @@ import { RankBadge, StatusBadge } from '@/components/StatusBadge';
 import { supabase, dbToCase } from '@/lib/supabase';
 import { Case } from '@/types';
 
-export const revalidate = 0;
+export const revalidate = 30;
 
 function mapsUrl(address: string) {
   return `https://maps.google.com/maps?q=${encodeURIComponent(address)}`;

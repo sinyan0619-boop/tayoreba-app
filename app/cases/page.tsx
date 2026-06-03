@@ -7,7 +7,7 @@ import { CasesFilter } from './CasesFilter';
 import CasesList from '@/components/CasesList';
 import { detectPref } from '@/lib/address';
 
-export const revalidate = 0;
+export const revalidate = 30;
 
 interface Props {
   searchParams: Promise<{ status?: string; pref?: string; assignee?: string; q?: string; haito_kigen?: string; rank?: string }>
