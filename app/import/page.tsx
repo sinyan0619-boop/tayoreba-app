@@ -155,6 +155,7 @@ export default function ImportPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [step, setStep] = useState<Step>('upload');
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [mapping, setMapping] = useState<Partial<Record<AppFieldKey, string>>>({});
@@ -167,34 +168,34 @@ export default function ImportPage() {
     const isXlsx = /\.(xlsx|xls)$/i.test(file.name);
 
     if (isPdf) {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const form = new FormData();
-        form.append('file', file);
-        const res = await fetch('/api/parse-pdf', { method: 'POST', body: form });
-        if (!res.ok) { alert(`PDF解析エラー: ${await res.text()}`); return; }
-        const json = await res.json();
-        if (json.error) { alert(`PDF解析エラー: ${json.error}`); return; }
+      setPdfLoading(true);
+      const form = new FormData();
+      form.append('file', file);
+      fetch('/api/parse-pdf', { method: 'POST', body: form })
+        .then(async (res) => {
+          if (!res.ok) { alert(`PDF解析エラー: ${await res.text()}`); return; }
+          const json = await res.json();
+          if (json.error) { alert(`PDF解析エラー: ${json.error}`); return; }
 
-        const props: { address: string; owner_name: string; case_number?: string; notes?: string }[] =
-          json.properties ?? [];
-        if (props.length === 0) { alert('物件データを抽出できませんでした'); return; }
+          const props: { address: string; owner_name: string; case_number?: string; notes?: string }[] =
+            json.properties ?? [];
+          if (props.length === 0) { alert('物件データを抽出できませんでした'); return; }
 
-        // PDFの場合はマッピング不要で直接データをセット
-        const syntheticHeaders = ['address', 'owner_name', 'case_number', 'notes'];
-        const syntheticRows = props.map((p) => ({
-          address:     p.address    ?? '',
-          owner_name:  p.owner_name ?? '',
-          case_number: p.case_number ?? '',
-          notes:       p.notes       ?? '',
-        }));
-        setHeaders(syntheticHeaders);
-        setRows(syntheticRows);
-        setMapping({ address: 'address', ownerName: 'owner_name', caseNumber: 'case_number', notes: 'notes' });
-        if (json.title_date) setDefaultHaitoDate(json.title_date);
-        setStep('preview');
-      };
-      reader.readAsArrayBuffer(file);
+          const syntheticHeaders = ['address', 'owner_name', 'case_number', 'notes'];
+          const syntheticRows = props.map((p) => ({
+            address:     p.address    ?? '',
+            owner_name:  p.owner_name ?? '',
+            case_number: p.case_number ?? '',
+            notes:       p.notes       ?? '',
+          }));
+          setHeaders(syntheticHeaders);
+          setRows(syntheticRows);
+          setMapping({ address: 'address', ownerName: 'owner_name', caseNumber: 'case_number', notes: 'notes' });
+          if (json.title_date) setDefaultHaitoDate(json.title_date);
+          setStep('preview');
+        })
+        .catch((err) => alert(`PDF解析エラー: ${err.message}`))
+        .finally(() => setPdfLoading(false));
       return;
     }
 
@@ -387,7 +388,17 @@ export default function ImportPage() {
         {/* ── STEP 1: アップロード ── */}
         {step === 'upload' && (
           <>
+            {/* PDFローディング */}
+            {pdfLoading && (
+              <div className="border-2 border-blue-300 bg-blue-50 rounded-2xl flex flex-col items-center justify-center py-12 gap-3">
+                <div className="w-8 h-8 border-4 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                <p className="text-sm font-semibold text-blue-700">AIがPDFを解析中...</p>
+                <p className="text-xs text-blue-500">30秒ほどかかります</p>
+              </div>
+            )}
+
             {/* ドロップゾーン */}
+            {!pdfLoading && (
             <div
               onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
               onDragLeave={() => setIsDragging(false)}
@@ -409,8 +420,10 @@ export default function ImportPage() {
                 onChange={onFileChange}
               />
             </div>
+            )}
 
             {/* 写真インポートへのリンク */}
+            {!pdfLoading && (
             <Link
               href="/import/photo"
               className="flex items-center gap-3 bg-white rounded-2xl p-4 shadow-sm active:bg-gray-50"
@@ -422,8 +435,10 @@ export default function ImportPage() {
               </div>
               <span className="ml-auto text-gray-400">›</span>
             </Link>
+            )}
 
             {/* フォーマット説明 */}
+            {!pdfLoading && (
             <div className="bg-white rounded-2xl p-4 shadow-sm space-y-2">
               <div className="flex items-center justify-between">
                 <p className="font-semibold text-gray-700 text-sm">想定CSV列</p>
@@ -449,6 +464,7 @@ export default function ImportPage() {
                 ランク: A / B / C
               </p>
             </div>
+            )}
           </>
         )}
 
