@@ -64,6 +64,9 @@ export default function CasesList({ cases }: { cases: Case[] }) {
             <div className="ml-3 flex-1 min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="font-medium text-gray-900">{c.ownerName}</span>
+                {c.caseNumber && (
+                  <span className="text-xs text-gray-400 font-normal">{c.caseNumber}</span>
+                )}
                 {isFav(c.id) && (
                   <span className="text-amber-400 text-xs leading-none">★</span>
                 )}

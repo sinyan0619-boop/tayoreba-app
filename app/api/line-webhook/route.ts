@@ -1,18 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { addPrefecture } from '@/lib/address';
 import { autoGeocode } from '@/lib/geocode';
+import { createAdminClient } from '@/lib/supabase';
 
 export const runtime    = 'nodejs';
 export const dynamic    = 'force-dynamic';
 export const maxDuration = 60;
 
 // ── LINE API ヘルパー ─────────────────────────────────────────
-async function getLineImage(messageId: string, token: string): Promise<{ buffer: Buffer; mimeType: string }> {
+async function getLineContent(messageId: string, token: string): Promise<{ buffer: Buffer; mimeType: string }> {
   const res = await fetch(
     `https://api-data.line.me/v2/bot/message/${messageId}/content`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
-  if (!res.ok) throw new Error(`LINE image fetch failed: ${res.status} ${res.statusText}`);
+  if (!res.ok) throw new Error(`LINE content fetch failed: ${res.status} ${res.statusText}`);
   const ct = res.headers.get('content-type') ?? 'image/jpeg';
   const mimeType = ct.split(';')[0].trim();
   const buffer = Buffer.from(await res.arrayBuffer());
@@ -29,6 +30,13 @@ async function replyLine(replyToken: string, text: string, token: string) {
 }
 
 // ── line_context ──────────────────────────────────────────────
+interface LineContext {
+  haitoDate: string;
+  updatedAt: Date;
+  propertyId?: string;
+  candidates?: { id: string; name: string; address: string }[];
+}
+
 async function saveHaitoDate(lineUserId: string, haitoDate: string, sbUrl: string, sbKey: string) {
   await fetch(`${sbUrl}/rest/v1/line_context`, {
     method: 'POST',
@@ -41,25 +49,49 @@ async function saveHaitoDate(lineUserId: string, haitoDate: string, sbUrl: strin
   });
 }
 
-// 保存済み配当日を取得（24時間で期限切れ）
-async function getStoredContext(lineUserId: string, sbUrl: string, sbKey: string): Promise<{ haitoDate: string; updatedAt: Date } | null> {
+async function getStoredContext(lineUserId: string, sbUrl: string, sbKey: string): Promise<LineContext | null> {
   const res = await fetch(
-    `${sbUrl}/rest/v1/line_context?line_user_id=eq.${encodeURIComponent(lineUserId)}&select=haito_date,updated_at`,
+    `${sbUrl}/rest/v1/line_context?line_user_id=eq.${encodeURIComponent(lineUserId)}&select=haito_date,updated_at,property_id,candidates`,
     { headers: { 'apikey': sbKey, 'Authorization': `Bearer ${sbKey}` } }
   );
   if (!res.ok) return null;
-  const data: { haito_date: string; updated_at: string }[] = await res.json();
+  const data: { haito_date: string; updated_at: string; property_id?: string | null; candidates?: string | null }[] = await res.json();
   if (!data[0]) return null;
   const updatedAt = new Date(data[0].updated_at);
-  const hoursElapsed = (Date.now() - updatedAt.getTime()) / 3600000;
-  if (hoursElapsed > 24) return null; // 24時間で期限切れ
-  return { haitoDate: data[0].haito_date, updatedAt };
+  if ((Date.now() - updatedAt.getTime()) / 3600000 > 24) return null;
+  return {
+    haitoDate: data[0].haito_date,
+    updatedAt,
+    propertyId: data[0].property_id ?? undefined,
+    candidates: data[0].candidates ? JSON.parse(data[0].candidates) : undefined,
+  };
+}
+
+async function patchContext(lineUserId: string, patch: Record<string, unknown>, sbUrl: string, sbKey: string) {
+  await fetch(`${sbUrl}/rest/v1/line_context`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': sbKey, 'Authorization': `Bearer ${sbKey}`,
+      'Prefer': 'resolution=merge-duplicates',
+    },
+    body: JSON.stringify({ line_user_id: lineUserId, updated_at: new Date().toISOString(), ...patch }),
+  });
+}
+
+async function clearAttachContext(lineUserId: string, sbUrl: string, sbKey: string) {
+  await fetch(
+    `${sbUrl}/rest/v1/line_context?line_user_id=eq.${encodeURIComponent(lineUserId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'apikey': sbKey, 'Authorization': `Bearer ${sbKey}` },
+      body: JSON.stringify({ property_id: null, candidates: null }),
+    }
+  );
 }
 
 // 直近バッチの配当日を一括修正
-async function fixRecentBatch(
-  lineUserId: string, newDate: string, sbUrl: string, sbKey: string
-): Promise<number> {
+async function fixRecentBatch(lineUserId: string, newDate: string, sbUrl: string, sbKey: string): Promise<number> {
   const ctx = await getStoredContext(lineUserId, sbUrl, sbKey);
   if (!ctx) return 0;
   const windowStart = new Date(ctx.updatedAt.getTime() - 2 * 3600000).toISOString();
@@ -80,6 +112,70 @@ async function fixRecentBatch(
   return updated.length;
 }
 
+// ── 案件検索 ─────────────────────────────────────────────────
+
+// "8ヌ4" → LIKE パターン "*8*ヌ*4*"（令和8年(ヌ)第4号 にマッチ）
+function parseCaseShorthand(keyword: string): string | null {
+  const m = keyword.match(/^(\d+)([ァ-ン]+)(\d+)$/);
+  if (!m) return null;
+  return `*${m[1]}*${m[2]}*${m[3]}*`;
+}
+
+async function searchProperties(
+  keyword: string | null,
+  sbUrl: string,
+  sbKey: string
+): Promise<{ id: string; owner_name: string; address: string; case_number: string | null }[]> {
+  let url: string;
+  if (keyword) {
+    const shorthand = parseCaseShorthand(keyword);
+    if (shorthand) {
+      // 短縮形（8ヌ4）→ 事件番号のみで検索
+      url = `${sbUrl}/rest/v1/properties?case_number=ilike.${shorthand}&select=id,owner_name,address,case_number&order=updated_at.desc&limit=5`;
+    } else {
+      // 氏名・住所・事件番号で部分一致検索
+      const q = encodeURIComponent(keyword);
+      url = `${sbUrl}/rest/v1/properties?or=(owner_name.ilike.*${q}*,address.ilike.*${q}*,case_number.ilike.*${q}*)&select=id,owner_name,address,case_number&order=updated_at.desc&limit=5`;
+    }
+  } else {
+    // キーワードなし → 最近更新された5件
+    url = `${sbUrl}/rest/v1/properties?select=id,owner_name,address,case_number&order=updated_at.desc&limit=5`;
+  }
+  const res = await fetch(url, { headers: { 'apikey': sbKey, 'Authorization': `Bearer ${sbKey}` } });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+// ── 案件ファイル添付 ──────────────────────────────────────────
+async function uploadCaseFile(
+  buffer: Buffer,
+  mimeType: string,
+  fileName: string,
+  propertyId: string,
+): Promise<boolean> {
+  const admin = createAdminClient();
+  const storagePath = `${propertyId}/${Date.now()}_${fileName}`;
+  const { error: storageError } = await admin.storage
+    .from('case-files')
+    .upload(storagePath, buffer, { contentType: mimeType, upsert: false });
+  if (storageError) { console.error('Storage error:', storageError.message); return false; }
+  const ext = fileName.split('.').pop()?.toLowerCase() ?? '';
+  const fileType = ext === 'pdf' ? 'pdf' : 'jpeg';
+  const { error: dbError } = await admin.from('case_files').insert({
+    property_id: propertyId,
+    file_name: fileName,
+    file_path: storagePath,
+    file_type: fileType,
+    file_size: buffer.length,
+  });
+  if (dbError) {
+    await admin.storage.from('case-files').remove([storagePath]);
+    console.error('DB error:', dbError.message);
+    return false;
+  }
+  return true;
+}
+
 // ── Claude OCR ───────────────────────────────────────────────
 interface ExtractedProperty {
   address: string;
@@ -92,7 +188,6 @@ interface ExtractedProperty {
 async function ocrWithClaude(buffer: Buffer, mimeType: string): Promise<ExtractedProperty[]> {
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
   const message = await anthropic.messages.create({
     model: 'claude-opus-4-7',
     max_tokens: 2048,
@@ -122,13 +217,11 @@ JSONのみ返してください。物件が見つからない場合は空配列 
       ],
     }],
   });
-
   const text = message.content
     .filter((b) => b.type === 'text')
     .map((b) => (b as { type: 'text'; text: string }).text)
     .join('');
   console.log('Claude raw response:', text.slice(0, 500));
-
   const match = text.match(/\[[\s\S]*\]/);
   if (!match) return [];
   const parsed = JSON.parse(match[0]);
@@ -150,6 +243,12 @@ function extractDate(text: string): string | null {
   return null;
 }
 
+function candidateListText(candidates: { id: string; name: string; address: string }[]): string {
+  return candidates
+    .map((c, i) => `${i + 1}. ${c.name}\n   ${c.address}`)
+    .join('\n\n');
+}
+
 // ── Webhook ハンドラ ──────────────────────────────────────────
 export async function POST(req: NextRequest) {
   const body      = await req.text();
@@ -160,7 +259,6 @@ export async function POST(req: NextRequest) {
   const sbKey     = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
   if (secret && secret !== 'xxx' && !verifySignature(body, signature, secret)) {
-    console.error('Signature mismatch');
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
 
@@ -176,11 +274,68 @@ export async function POST(req: NextRequest) {
     const { replyToken, message } = event;
     const lineUserId: string = event.source?.userId ?? 'unknown';
 
-    // テキストメッセージ
+    // ── テキストメッセージ ──────────────────────────────────
     if (message.type === 'text') {
       const text: string = message.text.trim();
 
-      // 「配当日修正 YYYY-MM-DD」→ 直近バッチを一括更新
+      // 「1」〜「5」の数字 → 候補から選択
+      if (/^[1-5]$/.test(text)) {
+        const ctx = await getStoredContext(lineUserId, sbUrl, sbKey);
+        if (ctx?.candidates && ctx.candidates.length > 0) {
+          const idx = parseInt(text, 10) - 1;
+          const chosen = ctx.candidates[idx];
+          if (chosen) {
+            await patchContext(lineUserId, { property_id: chosen.id, candidates: null }, sbUrl, sbKey);
+            await replyLine(
+              replyToken,
+              `📎 添付モード\n案件：${chosen.name}\n住所：${chosen.address}\n\n次に送った画像・PDFがこの案件に資料として追加されます。`,
+              token
+            );
+          } else {
+            await replyLine(replyToken, `⚠️ ${text} は選択肢にありません。`, token);
+          }
+          continue;
+        }
+      }
+
+      // 「添付」または「添付 キーワード」
+      if (text.startsWith('添付')) {
+        const keyword = text.replace(/^添付\s*/, '').trim() || null;
+        const results = await searchProperties(keyword, sbUrl, sbKey);
+
+        if (results.length === 0) {
+          const msg = keyword
+            ? `⚠️ 「${keyword}」に一致する案件が見つかりませんでした。\n別のキーワードで試してください。`
+            : '⚠️ 案件が見つかりませんでした。';
+          await replyLine(replyToken, msg, token);
+          continue;
+        }
+
+        if (results.length === 1) {
+          const prop = results[0];
+          await patchContext(lineUserId, { property_id: prop.id, candidates: null }, sbUrl, sbKey);
+          await replyLine(
+            replyToken,
+            `📎 添付モード\n案件：${prop.owner_name}\n住所：${prop.address}\n\n次に送った画像・PDFがこの案件に資料として追加されます。`,
+            token
+          );
+          continue;
+        }
+
+        // 複数ヒット → 番号リスト表示
+        const candidates = results.map((r) => ({ id: r.id, name: r.owner_name, address: r.address }));
+        await patchContext(lineUserId, { candidates: JSON.stringify(candidates), property_id: null }, sbUrl, sbKey);
+        const listText = candidateListText(candidates);
+        const header = keyword ? `「${keyword}」の検索結果（${results.length}件）` : `最近の案件（${results.length}件）`;
+        await replyLine(
+          replyToken,
+          `📎 ${header}\n\n${listText}\n\n番号を送ると添付先に設定されます。`,
+          token
+        );
+        continue;
+      }
+
+      // 「配当日修正 YYYY-MM-DD」
       if (text.includes('修正')) {
         const newDate = extractDate(text);
         if (newDate) {
@@ -190,14 +345,14 @@ export async function POST(req: NextRequest) {
             replyToken,
             count > 0
               ? `✅ ${count}件の配当日を ${newDate} に修正しました。`
-              : `⚠️ 修正対象が見つかりませんでした。\n（登録から2時間以上経過している場合は直接アプリから編集してください）`,
+              : `⚠️ 修正対象が見つかりませんでした。`,
             token
           );
           continue;
         }
       }
 
-      // 「YYYY-MM-DD」など日付のみ → 配当日を設定
+      // 日付のみ → 配当日を設定
       const dateStr = extractDate(text);
       if (dateStr) {
         await saveHaitoDate(lineUserId, dateStr, sbUrl, sbKey);
@@ -209,39 +364,44 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      // その他テキスト → ヘルプ
+      // ヘルプ
       await replyLine(
         replyToken,
-        '競売物件リストの画像を送ってください。\nOCRで物件情報を解析します。\n\n📅 配当日を設定するには日付を送ってください。\n例：2026-06-30\n\n🔧 日付を間違えた場合：\n「修正 2026-07-31」と送ると直近の登録分を一括更新できます。',
+        '競売物件リストの画像を送ってください。\nOCRで物件情報を解析します。\n\n📅 配当日設定：日付を送る\n例：2026-06-30\n\n📎 資料を案件に添付：\n「添付」→ 最近の案件リスト\n「添付 田中」→ 氏名/住所で検索\n→ 番号を返信して選択\n→ 画像・PDFを送る\n\n🔧 日付修正：「修正 2026-07-31」',
         token
       );
       continue;
     }
 
-    // 画像 → OCR → DB保存
+    // ── 画像 ────────────────────────────────────────────────
     if (message.type === 'image') {
-      const sendDate: string = new Date(event.timestamp).toISOString().split('T')[0];
-
       try {
-        const { buffer, mimeType } = await getLineImage(message.id, token);
-        console.log(`Image received: ${mimeType}, size: ${buffer.length} bytes`);
-
+        const { buffer, mimeType } = await getLineContent(message.id, token);
         const ctx = await getStoredContext(lineUserId, sbUrl, sbKey);
-        const usedHaitoDate = ctx?.haitoDate ?? sendDate;
 
+        // 添付モード
+        if (ctx?.propertyId) {
+          const ext = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
+          const fileName = `LINE_${Date.now()}.${ext}`;
+          const ok = await uploadCaseFile(buffer, mimeType, fileName, ctx.propertyId);
+          await clearAttachContext(lineUserId, sbUrl, sbKey);
+          await replyLine(replyToken, ok ? '✅ 画像を案件の資料に追加しました。' : '⚠️ ファイルの保存に失敗しました。', token);
+          continue;
+        }
+
+        // OCRモード
+        const sendDate = new Date(event.timestamp).toISOString().split('T')[0];
+        const usedHaitoDate = ctx?.haitoDate ?? sendDate;
         const properties = await ocrWithClaude(buffer, mimeType);
-        console.log(`Extracted ${properties.length} properties`);
 
         if (properties.length === 0) {
-          await replyLine(replyToken, '物件情報を抽出できませんでした。\n競売物件リストの画像を送ってください。', token);
+          await replyLine(replyToken, '物件情報を抽出できませんでした。\n\n📎 資料を案件に添付したい場合は「添付」と送ってください。', token);
           continue;
         }
 
         const valid = properties.filter((p) => p.address);
-
-        // 重複チェック: case_number がある物件は既存レコードを検索
         const caseNumbers = valid.map((p) => p.case_number).filter(Boolean) as string[];
-        let existingMap: Record<string, string> = {}; // case_number → id
+        let existingMap: Record<string, string> = {};
         if (caseNumbers.length > 0) {
           const filter = caseNumbers.map((n) => `case_number.eq.${encodeURIComponent(n)}`).join(',');
           const existRes = await fetch(
@@ -256,7 +416,6 @@ export async function POST(req: NextRequest) {
 
         const toInsert: object[] = [];
         let updateCount = 0;
-
         for (const p of valid) {
           const mapped = {
             address:     addPrefecture(p.address),
@@ -265,16 +424,11 @@ export async function POST(req: NextRequest) {
             haito_date:  p.haito_date ?? usedHaitoDate,
             notes:       p.notes ?? null,
           };
-
           const existingId = p.case_number ? existingMap[p.case_number] : undefined;
           if (existingId) {
-            // 既存レコードを更新（ステータス・ランク・担当者は保持）
             await fetch(`${sbUrl}/rest/v1/properties?id=eq.${existingId}`, {
               method: 'PATCH',
-              headers: {
-                'Content-Type': 'application/json',
-                'apikey': sbKey, 'Authorization': `Bearer ${sbKey}`,
-              },
+              headers: { 'Content-Type': 'application/json', 'apikey': sbKey, 'Authorization': `Bearer ${sbKey}` },
               body: JSON.stringify({ ...mapped, updated_at: new Date().toISOString() }),
             });
             updateCount++;
@@ -294,13 +448,11 @@ export async function POST(req: NextRequest) {
             },
             body: JSON.stringify(toInsert),
           });
-          if (!insertRes.ok) throw new Error(`Supabase insert failed: ${insertRes.status} ${await insertRes.text()}`);
+          if (!insertRes.ok) throw new Error(`Insert failed: ${insertRes.status} ${await insertRes.text()}`);
           const inserted: { id: string }[] = await insertRes.json();
           insertedCount = inserted.length;
         }
         autoGeocode(3).catch(() => {});
-
-        // updated_at を更新してバッチ時刻を記録（修正コマンド用）
         await saveHaitoDate(lineUserId, usedHaitoDate, sbUrl, sbKey);
 
         const dateLabel = ctx ? `${usedHaitoDate}（設定済み）` : `${usedHaitoDate}（送信日）`;
@@ -321,9 +473,27 @@ export async function POST(req: NextRequest) {
         await replyLine(replyToken, lines.join('\n\n'), token);
 
       } catch (err: any) {
-        const msg = err?.message ?? String(err);
-        console.error('LINE webhook error:', msg, err?.stack);
-        await replyLine(replyToken, `⚠️ エラーが発生しました\n${msg.slice(0, 200)}`, token);
+        console.error('Image handler error:', err?.message, err?.stack);
+        await replyLine(replyToken, `⚠️ エラーが発生しました\n${String(err?.message ?? err).slice(0, 200)}`, token);
+      }
+    }
+
+    // ── PDFファイル ─────────────────────────────────────────
+    if (message.type === 'file') {
+      try {
+        const ctx = await getStoredContext(lineUserId, sbUrl, sbKey);
+        if (!ctx?.propertyId) {
+          await replyLine(replyToken, '📎 資料を添付するには先に「添付」と送って案件を選んでください。', token);
+          continue;
+        }
+        const { buffer, mimeType } = await getLineContent(message.id, token);
+        const fileName = (message.fileName as string | undefined) ?? `LINE_${Date.now()}.pdf`;
+        const ok = await uploadCaseFile(buffer, mimeType || 'application/pdf', fileName, ctx.propertyId);
+        await clearAttachContext(lineUserId, sbUrl, sbKey);
+        await replyLine(replyToken, ok ? `✅ ${fileName} を案件の資料に追加しました。` : '⚠️ ファイルの保存に失敗しました。', token);
+      } catch (err: any) {
+        console.error('File handler error:', err?.message);
+        await replyLine(replyToken, `⚠️ エラー: ${String(err?.message ?? err).slice(0, 100)}`, token);
       }
     }
   }
