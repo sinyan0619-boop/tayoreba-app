@@ -18,6 +18,7 @@ export async function POST(req: NextRequest) {
   const file = formData.get('file') as File | null
   if (!file) return NextResponse.json({ error: 'ファイルがありません' }, { status: 400 })
 
+  try {
   const buffer = Buffer.from(await file.arrayBuffer())
   const base64 = buffer.toString('base64')
 
@@ -81,4 +82,8 @@ export async function POST(req: NextRequest) {
     }))
   }
   return NextResponse.json(parsed)
+  } catch (err: any) {
+    console.error('parse-pdf error:', err)
+    return NextResponse.json({ error: err?.message ?? String(err) }, { status: 500 })
+  }
 }
