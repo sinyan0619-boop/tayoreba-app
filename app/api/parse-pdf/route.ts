@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { addPrefecture } from '@/lib/address'
 import { jsonrepair } from 'jsonrepair'
 
-// 「〇〇丁目 地番 （住居表示）\nマンション名」→「〇〇丁目住居表示 マンション名」
+// 「〇〇[丁目/町/村] 地番 （住居表示）マンション名」→「〇〇[丁目/町/村]住居表示 マンション名」
 function normalizeAddress(address: string): string {
-  const m = address.match(/^(.*?丁目)[　 \s]*[\d０-９番地\s]*[（(]([^）)]+)[）)]([\s\S]*)$/)
+  const m = address.match(/^(.*?(?:丁目|[町村]))[　 \s]*[\d０-９番地\s]+[（(]([^）)]+)[）)]([\s\S]*)$/)
   if (m) {
     const building = m[3].trim()
     return (m[1] + m[2] + (building ? ' ' + building : '')).trim()
