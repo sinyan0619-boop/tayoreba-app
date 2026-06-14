@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { addPrefecture } from '@/lib/address'
 
+// 「〇〇丁目△△番△△（住居表示）」→「〇〇丁目住居表示」
+function normalizeAddress(address: string): string {
+  const m = address.match(/^(.*?丁目)\s*[^（(]*[（(]([^）)]+)[）)]/)
+  if (m) return m[1] + m[2]
+  return address
+}
+
 export const runtime    = 'nodejs'
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 60
@@ -69,7 +76,7 @@ export async function POST(req: NextRequest) {
   if (Array.isArray(parsed.properties)) {
     parsed.properties = parsed.properties.map((p: any) => ({
       ...p,
-      address: p.address ? addPrefecture(p.address) : p.address,
+      address: p.address ? addPrefecture(normalizeAddress(p.address)) : p.address,
     }))
   }
   return NextResponse.json(parsed)
