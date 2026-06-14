@@ -74,7 +74,14 @@ export async function POST(req: NextRequest) {
   const match = text.match(/\{[\s\S]*\}/)
   if (!match) return NextResponse.json({ error: 'データを抽出できませんでした' }, { status: 422 })
 
-  const parsed = JSON.parse(match[0])
+  let parsed: any
+  try {
+    parsed = JSON.parse(match[0])
+  } catch {
+    // 制御文字を除去してリトライ
+    const cleaned = match[0].replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
+    parsed = JSON.parse(cleaned)
+  }
   if (Array.isArray(parsed.properties)) {
     parsed.properties = parsed.properties.map((p: any) => ({
       ...p,
