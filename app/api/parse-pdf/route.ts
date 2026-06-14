@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { addPrefecture } from '@/lib/address'
+import { jsonrepair } from 'jsonrepair'
 
 // 「〇〇丁目△△番△△（住居表示またはマンション名）」→「〇〇丁目住居表示/マンション名」
 function normalizeAddress(address: string): string {
@@ -78,9 +79,7 @@ export async function POST(req: NextRequest) {
   try {
     parsed = JSON.parse(match[0])
   } catch {
-    // 制御文字を除去してリトライ
-    const cleaned = match[0].replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
-    parsed = JSON.parse(cleaned)
+    parsed = JSON.parse(jsonrepair(match[0]))
   }
   if (Array.isArray(parsed.properties)) {
     parsed.properties = parsed.properties.map((p: any) => ({
