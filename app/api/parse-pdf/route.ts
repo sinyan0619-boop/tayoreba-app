@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { addPrefecture } from '@/lib/address'
 
-// 「〇〇丁目△△番△△（住居表示）」→「〇〇丁目住居表示」
+// 「〇〇丁目△△番△△（住居表示またはマンション名）」→「〇〇丁目住居表示/マンション名」
 function normalizeAddress(address: string): string {
-  const m = address.match(/^(.*?丁目)\s*[^（(]*[（(]([^）)]+)[）)]/)
-  if (m) return m[1] + m[2]
+  // 全角・半角カッコ対応、丁目後の地番部分（数字・番・地・スペース）を除去
+  const m = address.match(/^(.*?丁目)[　 \s]*[\d０-９番地\s]*[（(]([^）)]+)[）)]/)
+  if (m) return (m[1] + m[2]).trim()
   return address
 }
 
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest) {
 
 注意：
 - 所有者が複数いる場合は最初の1人のみ
-- 住所の変換ルール：「〇〇丁目△△番（住居番号）」の形式の場合、丁目までの町名＋カッコ内の番号を使う。例：「小松町二丁目５５番１（４－２６）」→「小松町二丁目４－２６」、「稲葉荘一丁目１１番２（１４－１７）」→「稲葉荘一丁目１４－１７」。丁目がない場合は町名まで＋カッコ内の番号。カッコがない場合はそのまま。
+- 所在地はPDFに記載されている文字列をそのまま返す（カッコや内容を変換・省略しない）
 - JSONのみ返してください`,
           },
         ],
