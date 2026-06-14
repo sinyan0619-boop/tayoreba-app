@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { addPrefecture } from '@/lib/address'
 import { jsonrepair } from 'jsonrepair'
 
-// 「〇〇丁目△△番△△（住居表示またはマンション名）」→「〇〇丁目住居表示/マンション名」
+// 「〇〇丁目 地番 （住居表示）\nマンション名」→「〇〇丁目住居表示 マンション名」
 function normalizeAddress(address: string): string {
-  // 全角・半角カッコ対応、丁目後の地番部分（数字・番・地・スペース）を除去
-  const m = address.match(/^(.*?丁目)[　 \s]*[\d０-９番地\s]*[（(]([^）)]+)[）)]/)
-  if (m) return (m[1] + m[2]).trim()
+  const m = address.match(/^(.*?丁目)[　 \s]*[\d０-９番地\s]*[（(]([^）)]+)[）)]([\s\S]*)$/)
+  if (m) {
+    const building = m[3].trim()
+    return (m[1] + m[2] + (building ? ' ' + building : '')).trim()
+  }
   return address
 }
 
