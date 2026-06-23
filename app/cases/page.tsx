@@ -75,7 +75,7 @@ export default async function CasesPage({ searchParams }: Props) {
               ＋ 追加
             </Link>
             <Link
-              href="/import"
+              href={`/import?category=${encodeURIComponent(activeCategory)}`}
               className="flex items-center gap-1 bg-white/20 text-white text-xs font-medium px-3 py-1.5 rounded-full"
             >
               📥 CSV

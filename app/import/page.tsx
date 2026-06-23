@@ -1,9 +1,9 @@
 'use client';
 import { useCallback, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Header from '@/components/Header';
-import { CaseRank, CaseStatus } from '@/types';
+import { CaseCategory, CaseRank, CaseStatus } from '@/types';
 import { addPrefecture } from '@/lib/address';
 
 // ── xlsx パーサー（.xlsx / .xls 直接読込）──────────────────────────
@@ -150,8 +150,10 @@ const SAMPLE_CSV =
 
 type Step = 'upload' | 'mapping' | 'preview' | 'result';
 
-export default function ImportPage() {
+function ImportPageInner() {
   const router = useRouter();
+  const sp = useSearchParams();
+  const category = (sp.get('category') ?? '任意売却') as CaseCategory;
   const fileRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [step, setStep] = useState<Step>('upload');
@@ -272,6 +274,7 @@ export default function ImportPage() {
       case_number:     mapping.caseNumber ? (row[mapping.caseNumber] || null) : null,
       haito_date:      mapping.haitoDate  ? (normalizeDate(row[mapping.haitoDate] ?? '') ?? normalizeDate(defaultHaitoDate)) : normalizeDate(defaultHaitoDate),
       notes:           mapping.notes      ? (row[mapping.notes]      || null) : null,
+      category,
       import_batch_id: batchId,
     });
 
@@ -374,8 +377,8 @@ export default function ImportPage() {
   return (
     <div className="flex flex-col h-full">
       <Header
-        title="CSVインポート"
-        backHref="/cases"
+        title={`インポート（${category}）`}
+        backHref={`/cases?category=${encodeURIComponent(category)}`}
         right={
           <a href="/import/history" className="text-xs text-blue-500 font-medium">
             インポート履歴
@@ -725,7 +728,7 @@ export default function ImportPage() {
                 続けてインポート
               </button>
               <button
-                onClick={() => router.push('/cases')}
+                onClick={() => router.push(`/cases?category=${encodeURIComponent(category)}`)}
                 className="flex-1 py-3 rounded-xl text-white text-sm font-bold active:opacity-90"
                 style={{ backgroundColor: '#1a1a2e' }}
               >
@@ -736,5 +739,14 @@ export default function ImportPage() {
         )}
       </div>
     </div>
+  );
+}
+
+import { Suspense } from 'react';
+export default function ImportPage() {
+  return (
+    <Suspense fallback={null}>
+      <ImportPageInner />
+    </Suspense>
   );
 }
