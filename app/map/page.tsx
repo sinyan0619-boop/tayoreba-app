@@ -69,10 +69,10 @@ export default function MapPage() {
     try {
       sessionStorage.setItem('tayoreba_case_filter', JSON.stringify({
         status: selStatus, haitoKigen: selHaitoKigen, pref: selPref,
-        assignee: selAssignee, q: selQ, rank: selRank,
+        assignee: selAssignee, q: selQ, rank: selRank, category: selCategory,
       }));
     } catch {}
-  }, [selStatus, selHaitoKigen, selPref, selAssignee, selQ, selRank]);
+  }, [selStatus, selHaitoKigen, selPref, selAssignee, selQ, selRank, selCategory]);
 
   const fetchCases = useCallback(async () => {
     const { data } = await supabase.from('properties').select('*, visits(*)').eq('category', selCategory);
