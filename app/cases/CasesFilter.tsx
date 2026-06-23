@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ALL_HAITO_KIGEN } from '@/types'
+import { ALL_HAITO_KIGEN, ALL_CATEGORIES, CaseCategory } from '@/types'
 
 const STATUSES = ['未訪問', '訪問対象外', '訪問対象', '媒介', '契約']
 const PREFS    = ['京都', '滋賀', '大阪', '兵庫']
@@ -18,6 +18,7 @@ export function CasesFilter({ assignees }: { assignees: string[] }) {
   const assignee   = sp.get('assignee')    ?? ''
   const haitoKigen = sp.get('haito_kigen') ?? ''
   const rank       = sp.get('rank')        ?? ''
+  const category   = (sp.get('category')  ?? '任意売却') as CaseCategory
 
   const [inputValue, setInputValue] = useState(q)
   useEffect(() => setInputValue(q), [q])
@@ -35,10 +36,29 @@ export function CasesFilter({ assignees }: { assignees: string[] }) {
     router.push(`/cases?${params.toString()}`)
   }
 
+  const switchCategory = (cat: CaseCategory) => {
+    router.push(`/cases?category=${encodeURIComponent(cat)}`)
+  }
+
   const submitSearch = (val: string) => update('q', val)
 
   return (
-    <div className="bg-white border-b border-gray-100 px-4 py-3 space-y-2 shrink-0">
+    <div className="bg-white border-b border-gray-100 shrink-0">
+      <div className="flex border-b border-gray-100">
+        {ALL_CATEGORIES.map((cat) => (
+          <button
+            key={cat}
+            onClick={() => switchCategory(cat)}
+            className="flex-1 py-2.5 text-xs font-medium transition-colors"
+            style={category === cat
+              ? { color: '#1a1a2e', borderBottom: '2px solid #1a1a2e' }
+              : { color: '#9ca3af', borderBottom: '2px solid transparent' }}
+          >
+            {cat}
+          </button>
+        ))}
+      </div>
+      <div className="px-4 py-3 space-y-2">
       <div className="flex gap-2">
         <input
           type="search"
@@ -81,6 +101,7 @@ export function CasesFilter({ assignees }: { assignees: string[] }) {
           <option value="">ランク</option>
           {RANKS.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
+      </div>
       </div>
     </div>
   )

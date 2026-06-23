@@ -2,7 +2,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { CaseRank, CaseStatus } from '@/types'
+import { CaseCategory, CaseRank, CaseStatus } from '@/types'
 import { autoGeocode } from '@/lib/geocode'
 
 export async function createProperty(data: {
@@ -10,6 +10,7 @@ export async function createProperty(data: {
   owner_name: string
   status: CaseStatus
   rank: CaseRank
+  category: CaseCategory
   assignee: string | null
   case_number: string | null
   phone: string | null
@@ -19,5 +20,5 @@ export async function createProperty(data: {
   if (error) throw new Error(error.message)
   autoGeocode(1).catch(() => {})
   revalidatePath('/cases')
-  redirect('/cases')
+  redirect(`/cases?category=${encodeURIComponent(data.category)}`)
 }

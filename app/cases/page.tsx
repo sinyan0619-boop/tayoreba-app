@@ -10,11 +10,12 @@ import { detectPref } from '@/lib/address';
 export const revalidate = 30;
 
 interface Props {
-  searchParams: Promise<{ status?: string; pref?: string; assignee?: string; q?: string; haito_kigen?: string; rank?: string }>
+  searchParams: Promise<{ status?: string; pref?: string; assignee?: string; q?: string; haito_kigen?: string; rank?: string; category?: string }>
 }
 
 export default async function CasesPage({ searchParams }: Props) {
-  const { status, pref, assignee, q, haito_kigen, rank } = await searchParams
+  const { status, pref, assignee, q, haito_kigen, rank, category } = await searchParams
+  const activeCategory = category ?? '任意売却'
 
   // タイムリミット = haito_date + 3ヶ月。その1週間前にアラート
   const base = new Date();
@@ -27,6 +28,7 @@ export default async function CasesPage({ searchParams }: Props) {
       let query = supabase
         .from('properties')
         .select('*, visits(*)')
+        .eq('category', activeCategory)
         .order('updated_at', { ascending: false })
       if (status) query = query.eq('status', status)
       return query
@@ -34,6 +36,7 @@ export default async function CasesPage({ searchParams }: Props) {
     supabase
       .from('properties')
       .select('id, owner_name, haito_date')
+      .eq('category', activeCategory)
       .gte('haito_date', rangeStart)
       .lte('haito_date', rangeEnd)
       .order('haito_date'),
@@ -66,7 +69,7 @@ export default async function CasesPage({ searchParams }: Props) {
         right={
           <div className="flex items-center gap-2">
             <Link
-              href="/cases/new"
+              href={`/cases/new?category=${encodeURIComponent(activeCategory)}`}
               className="flex items-center gap-1 bg-white/20 text-white text-xs font-medium px-3 py-1.5 rounded-full"
             >
               ＋ 追加

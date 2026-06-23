@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Case, CaseRank, CaseStatus, Visit, VisitResult } from '@/types';
+import { Case, CaseCategory, CaseRank, CaseStatus, Visit, VisitResult } from '@/types';
 
 // build時にenv未設定でも createClient が throw しないようフォールバックを設定
 const url  = process.env.NEXT_PUBLIC_SUPABASE_URL  ?? 'https://placeholder.supabase.co';
@@ -45,6 +45,7 @@ export function dbToCase(p: Record<string, any>): Case {
     ownerName:  p.owner_name,
     status:     p.status     as CaseStatus,
     rank:       p.rank       as CaseRank,
+    category:   (p.category  as CaseCategory) ?? '任意売却',
     lat:        (p.lat && p.lat !== 0) ? p.lat : 34.622,
     lng:        (p.lng && p.lng !== 0) ? p.lng : 135.508,
     isGeocoded: p.lat !== null && p.lat !== 0,

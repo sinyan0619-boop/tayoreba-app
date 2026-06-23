@@ -1,8 +1,8 @@
 'use client'
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Header from '@/components/Header'
-import { CaseRank, CaseStatus, RANK_COLORS, STATUS_COLORS } from '@/types'
+import { CaseCategory, CaseRank, CaseStatus, RANK_COLORS, STATUS_COLORS } from '@/types'
 import { createProperty } from './actions'
 
 const STATUSES: CaseStatus[] = ['未訪問', '訪問対象外', '訪問対象', '媒介', '契約']
@@ -13,6 +13,9 @@ const labelCls = 'text-xs text-gray-500 mb-1.5 block'
 
 export default function NewCasePage() {
   const router = useRouter()
+  const sp = useSearchParams()
+  const initialCategory = (sp.get('category') ?? '任意売却') as CaseCategory
+
   const [address, setAddress]       = useState('')
   const [ownerName, setOwnerName]   = useState('')
   const [status, setStatus]         = useState<CaseStatus>('未訪問')
@@ -31,6 +34,7 @@ export default function NewCasePage() {
       owner_name:   ownerName.trim() || '（未記入）',
       status,
       rank,
+      category:     initialCategory,
       assignee:     assignee.trim()    || null,
       case_number:  caseNumber.trim()  || null,
       phone:        phone.trim()       || null,
@@ -40,7 +44,7 @@ export default function NewCasePage() {
 
   return (
     <div className="flex flex-col h-full">
-      <Header title="案件追加" backHref="/cases" />
+      <Header title={`案件追加（${initialCategory}）`} backHref={`/cases?category=${encodeURIComponent(initialCategory)}`} />
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         <div className="bg-white rounded-2xl p-4 shadow-sm space-y-4">
