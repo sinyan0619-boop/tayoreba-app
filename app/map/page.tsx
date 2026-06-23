@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import Header from '@/components/Header';
 import { supabase, dbToCase } from '@/lib/supabase';
 import { createClient } from '@/lib/supabase-browser';
-import { Case, CaseStatus, HaitoKigen, STATUS_COLORS, ALL_HAITO_KIGEN, matchesHaitoKigen } from '@/types';
+import { Case, CaseCategory, CaseStatus, HaitoKigen, STATUS_COLORS, ALL_HAITO_KIGEN, ALL_CATEGORIES, matchesHaitoKigen } from '@/types';
 import { UserLocation } from '@/components/MapView';
 import { LocationTracker } from './LocationTracker';
 import { detectPref } from '@/lib/address';
@@ -38,6 +38,7 @@ export default function MapPage() {
   const [userId, setUserId]               = useState<string | null>(null);
   const [displayName, setDisplayName]     = useState<string>('');
   const [loading, setLoading]             = useState(true);
+  const [selCategory, setSelCategory]     = useState<CaseCategory>('任意売却');
   const [selStatus, setSelStatus]         = useState('');
   const [selHaitoKigen, setSelHaitoKigen] = useState('');
   const [selPref, setSelPref]             = useState('');
@@ -53,8 +54,9 @@ export default function MapPage() {
     const sp = new URLSearchParams(window.location.search);
     const hasUrl = sp.toString().length > 0;
     const src = hasUrl
-      ? { status: sp.get('status'), haitoKigen: sp.get('haito_kigen'), pref: sp.get('pref'), assignee: sp.get('assignee'), q: sp.get('q') }
+      ? { status: sp.get('status'), haitoKigen: sp.get('haito_kigen'), pref: sp.get('pref'), assignee: sp.get('assignee'), q: sp.get('q'), category: sp.get('category') }
       : (() => { try { return JSON.parse(sessionStorage.getItem('tayoreba_case_filter') ?? '{}'); } catch { return {}; } })();
+    if (src.category)   setSelCategory(src.category as CaseCategory);
     if (src.status)     setSelStatus(src.status);
     if (src.haitoKigen) setSelHaitoKigen(src.haitoKigen);
     if (src.pref)       setSelPref(src.pref);
@@ -73,12 +75,15 @@ export default function MapPage() {
   }, [selStatus, selHaitoKigen, selPref, selAssignee, selQ, selRank]);
 
   const fetchCases = useCallback(async () => {
-    const { data } = await supabase.from('properties').select('*, visits(*)');
+    const { data } = await supabase.from('properties').select('*, visits(*)').eq('category', selCategory);
     setCases((data ?? []).map(dbToCase));
     setLoading(false);
-  }, []);
+  }, [selCategory]);
 
-  useEffect(() => { fetchCases(); }, [fetchCases]);
+  useEffect(() => {
+    setLoading(true);
+    fetchCases();
+  }, [fetchCases]);
 
   useEffect(() => {
     const auth = createClient();
@@ -170,6 +175,24 @@ export default function MapPage() {
   return (
     <div className="flex flex-col h-full">
       <Header title="地図" />
+
+      {/* Category tabs */}
+      <div className="bg-white border-b border-gray-100 shrink-0">
+        <div className="flex">
+          {ALL_CATEGORIES.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setSelCategory(cat)}
+              className="flex-1 py-2.5 text-xs font-medium transition-colors"
+              style={selCategory === cat
+                ? { color: '#1a1a2e', borderBottom: '2px solid #1a1a2e' }
+                : { color: '#9ca3af', borderBottom: '2px solid transparent' }}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Filter bar */}
       <div className="bg-white border-b border-gray-100 px-4 py-3 space-y-2 shrink-0">
