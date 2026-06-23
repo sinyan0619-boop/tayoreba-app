@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Header from '@/components/Header'
 import { CaseCategory, CaseRank, CaseStatus, RANK_COLORS, STATUS_COLORS } from '@/types'
@@ -11,7 +11,7 @@ const RANKS: CaseRank[] = ['A', 'B', 'C']
 const inputCls = 'w-full rounded-xl border border-gray-200 px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100'
 const labelCls = 'text-xs text-gray-500 mb-1.5 block'
 
-export default function NewCasePage() {
+function NewCaseForm() {
   const router = useRouter()
   const sp = useSearchParams()
   const initialCategory = (sp.get('category') ?? '任意売却') as CaseCategory
@@ -113,5 +113,13 @@ export default function NewCasePage() {
         </button>
       </div>
     </div>
+  )
+}
+
+export default function NewCasePage() {
+  return (
+    <Suspense fallback={null}>
+      <NewCaseForm />
+    </Suspense>
   )
 }
