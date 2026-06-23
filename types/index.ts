@@ -1,7 +1,7 @@
 export type CaseStatus = '未訪問' | '訪問対象外' | '訪問対象' | '媒介' | '契約';
 export type CaseRank = 'A' | 'B' | 'C';
-export type CaseCategory = '任意売却' | '相続' | '収益物件';
-export const ALL_CATEGORIES: CaseCategory[] = ['任意売却', '相続', '収益物件'];
+export type CaseCategory = '任意売却' | '相続' | '収益物件' | '販売物件';
+export const ALL_CATEGORIES: CaseCategory[] = ['任意売却', '相続', '収益物件', '販売物件'];
 export type VisitResult = '○' | '△' | '✖';
 export type HaitoKigen =
   // 過去
