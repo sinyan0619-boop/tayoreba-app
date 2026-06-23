@@ -7,6 +7,7 @@ function buildHrefFromFilter(base: string): string {
   try {
     const saved = JSON.parse(sessionStorage.getItem('tayoreba_case_filter') ?? '{}');
     const p = new URLSearchParams();
+    if (saved.category)   p.set('category',    saved.category);
     if (saved.status)     p.set('status',      saved.status);
     if (saved.haitoKigen) p.set('haito_kigen', saved.haitoKigen);
     if (saved.pref)       p.set('pref',        saved.pref);

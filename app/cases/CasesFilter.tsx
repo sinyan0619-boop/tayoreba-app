@@ -23,21 +23,7 @@ export function CasesFilter({ assignees }: { assignees: string[] }) {
   const [inputValue, setInputValue] = useState(q)
   useEffect(() => setInputValue(q), [q])
 
-  // 地図ページで選んだカテゴリをURLに反映
-  useEffect(() => {
-    if (!sp.get('category')) {
-      try {
-        const saved = JSON.parse(sessionStorage.getItem('tayoreba_case_filter') ?? '{}')
-        if (saved.category) {
-          const params = new URLSearchParams(sp.toString())
-          params.set('category', saved.category)
-          router.replace(`/cases?${params.toString()}`)
-        }
-      } catch {}
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
+useEffect(() => {
     try {
       sessionStorage.setItem('tayoreba_case_filter', JSON.stringify({ status, haitoKigen, pref, assignee, q, rank, category }))
     } catch {}
