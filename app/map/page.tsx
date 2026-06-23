@@ -38,7 +38,16 @@ export default function MapPage() {
   const [userId, setUserId]               = useState<string | null>(null);
   const [displayName, setDisplayName]     = useState<string>('');
   const [loading, setLoading]             = useState(true);
-  const [selCategory, setSelCategory]     = useState<CaseCategory>('任意売却');
+  const [selCategory, setSelCategory]     = useState<CaseCategory>(() => {
+    if (typeof window === 'undefined') return '任意売却'
+    const sp = new URLSearchParams(window.location.search)
+    if (sp.get('category')) return sp.get('category') as CaseCategory
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('tayoreba_case_filter') ?? '{}')
+      if (saved.category) return saved.category as CaseCategory
+    } catch {}
+    return '任意売却'
+  });
   const [selStatus, setSelStatus]         = useState('');
   const [selHaitoKigen, setSelHaitoKigen] = useState('');
   const [selPref, setSelPref]             = useState('');
@@ -56,7 +65,6 @@ export default function MapPage() {
     const src = hasUrl
       ? { status: sp.get('status'), haitoKigen: sp.get('haito_kigen'), pref: sp.get('pref'), assignee: sp.get('assignee'), q: sp.get('q'), category: sp.get('category') }
       : (() => { try { return JSON.parse(sessionStorage.getItem('tayoreba_case_filter') ?? '{}'); } catch { return {}; } })();
-    if (src.category)   setSelCategory(src.category as CaseCategory);
     if (src.status)     setSelStatus(src.status);
     if (src.haitoKigen) setSelHaitoKigen(src.haitoKigen);
     if (src.pref)       setSelPref(src.pref);
