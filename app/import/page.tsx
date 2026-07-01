@@ -166,8 +166,9 @@ function ImportPageInner() {
   const [result, setResult] = useState({ success: 0, error: 0, updated: 0 });
 
   const processFile = (file: File) => {
-    const isPdf  = /\.pdf$/i.test(file.name);
-    const isXlsx = /\.(xlsx|xls)$/i.test(file.name);
+    const isPdf   = /\.pdf$/i.test(file.name);
+    const isXlsx  = /\.(xlsx|xls)$/i.test(file.name);
+    const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp)$/i.test(file.name);
 
     if (isPdf) {
       setPdfLoading(true);
@@ -198,6 +199,45 @@ function ImportPageInner() {
         })
         .catch((err) => alert(`PDF解析エラー: ${err.message}`))
         .finally(() => setPdfLoading(false));
+      return;
+    }
+
+    if (isImage) {
+      setPdfLoading(true);
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const buffer = e.target?.result as ArrayBuffer;
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+        const mediaType = file.type || (/\.png$/i.test(file.name) ? 'image/png' : 'image/jpeg');
+
+        try {
+          const res = await fetch('/api/parse-photo', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ base64, mediaType }),
+          });
+          const json = await res.json();
+          if (json.error) { alert(`画像解析エラー: ${json.error}`); return; }
+
+          const syntheticHeaders = ['address', 'owner_name', 'case_number', 'notes'];
+          const syntheticRows = [{
+            address:     json.address     ?? '',
+            owner_name:  json.owner_name  ?? '',
+            case_number: json.case_number ?? '',
+            notes:       json.notes       ?? '',
+          }];
+          setHeaders(syntheticHeaders);
+          setRows(syntheticRows);
+          setMapping({ address: 'address', ownerName: 'owner_name', caseNumber: 'case_number', notes: 'notes' });
+          if (json.haito_date) setDefaultHaitoDate(json.haito_date);
+          setStep('preview');
+        } catch (err: any) {
+          alert(`画像解析エラー: ${err.message}`);
+        } finally {
+          setPdfLoading(false);
+        }
+      };
+      reader.readAsArrayBuffer(file);
       return;
     }
 
@@ -395,7 +435,7 @@ function ImportPageInner() {
             {pdfLoading && (
               <div className="border-2 border-blue-300 bg-blue-50 rounded-2xl flex flex-col items-center justify-center py-12 gap-3">
                 <div className="w-8 h-8 border-4 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                <p className="text-sm font-semibold text-blue-700">AIがPDFを解析中...</p>
+                <p className="text-sm font-semibold text-blue-700">AIが解析中...</p>
                 <p className="text-xs text-blue-500">30秒ほどかかります</p>
               </div>
             )}
@@ -414,11 +454,11 @@ function ImportPageInner() {
               <p className="font-semibold text-gray-700 text-sm">
                 ファイルをドロップ
               </p>
-              <p className="text-xs text-gray-400 mt-1">.xlsx / .xls / .csv / .pdf 対応</p>
+              <p className="text-xs text-gray-400 mt-1">.xlsx / .xls / .csv / .pdf / JPG / PNG 対応</p>
               <input
                 ref={fileRef}
                 type="file"
-                accept=".xlsx,.xls,.csv,.pdf,text/csv,application/pdf"
+                accept=".xlsx,.xls,.csv,.pdf,.jpg,.jpeg,.png,text/csv,application/pdf,image/*"
                 className="hidden"
                 onChange={onFileChange}
               />
