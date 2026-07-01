@@ -214,18 +214,25 @@ function ImportPageInner() {
           const res = await fetch('/api/parse-photo', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ base64, mediaType }),
+            body: JSON.stringify({ base64, mediaType, mode: 'table' }),
           });
           const json = await res.json();
           if (json.error) { alert(`画像解析エラー: ${json.error}`); return; }
 
+          // 一覧表なら全行、単票なら1件として扱う
+          const props: { address?: string; owner_name?: string; case_number?: string; notes?: string }[] =
+            Array.isArray(json.properties) && json.properties.length > 0
+              ? json.properties
+              : [json];
+          if (props.length === 0) { alert('物件データを抽出できませんでした'); return; }
+
           const syntheticHeaders = ['address', 'owner_name', 'case_number', 'notes'];
-          const syntheticRows = [{
-            address:     json.address     ?? '',
-            owner_name:  json.owner_name  ?? '',
-            case_number: json.case_number ?? '',
-            notes:       json.notes       ?? '',
-          }];
+          const syntheticRows = props.map((p) => ({
+            address:     p.address     ?? '',
+            owner_name:  p.owner_name  ?? '',
+            case_number: p.case_number ?? '',
+            notes:       p.notes       ?? '',
+          }));
           setHeaders(syntheticHeaders);
           setRows(syntheticRows);
           setMapping({ address: 'address', ownerName: 'owner_name', caseNumber: 'case_number', notes: 'notes' });
