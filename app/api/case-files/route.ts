@@ -5,6 +5,9 @@ export async function POST(req: NextRequest) {
   const fd = await req.formData();
   const file = fd.get('file') as File | null;
   const propertyId = fd.get('property_id') as string | null;
+  const rawCategory = fd.get('category') as string | null;
+  const CATEGORIES = ['写真', '登記簿', '物件目録', 'その他'];
+  const category = rawCategory && CATEGORIES.includes(rawCategory) ? rawCategory : 'その他';
 
   if (!file || !propertyId) {
     return NextResponse.json({ error: 'Missing file or property_id' }, { status: 400 });
@@ -31,6 +34,7 @@ export async function POST(req: NextRequest) {
     file_path: storagePath,
     file_type: fileType,
     file_size: file.size,
+    category,
   });
 
   if (dbError) {

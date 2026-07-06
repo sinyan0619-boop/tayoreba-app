@@ -39,7 +39,8 @@ async function geocodeNominatim(address: string): Promise<[number, number] | nul
 export async function POST() {
   const supabase = createAdminClient()
 
-  const { data: properties, error } = await supabase
+  // 所在地（lat/lng）と所有者住所（owner_lat/owner_lng）の両方を対象にする
+  const { data: pendingAddr, error } = await supabase
     .from('properties')
     .select('id, address')
     .or('lat.is.null,lat.eq.0')
@@ -47,15 +48,31 @@ export async function POST() {
     .limit(5)
 
   if (error) return NextResponse.json({ error: `DB読み込みエラー: ${error.message}` }, { status: 500 })
-  if (!properties?.length) return NextResponse.json({ geocoded: 0, remaining: 0, done: true })
+
+  const jobs: { id: string; address: string; kind: 'addr' | 'owner' }[] =
+    (pendingAddr ?? [])
+      .filter((p) => p.address?.trim())
+      .map((p) => ({ id: p.id, address: p.address as string, kind: 'addr' as const }))
+
+  if (jobs.length < 5) {
+    const { data: pendingOwner } = await supabase
+      .from('properties')
+      .select('id, owner_address')
+      .is('owner_lat', null)
+      .not('owner_address', 'is', null)
+      .limit(5 - jobs.length)
+    for (const p of pendingOwner ?? []) {
+      if (p.owner_address?.trim()) jobs.push({ id: p.id, address: p.owner_address, kind: 'owner' })
+    }
+  }
+
+  if (!jobs.length) return NextResponse.json({ geocoded: 0, remaining: 0, done: true })
 
   let geocoded = 0
   const log: string[] = []
 
-  for (const prop of properties) {
-    if (!prop.address?.trim()) continue
-
-    const fullAddress = addPrefecture(prop.address)
+  for (const job of jobs) {
+    const fullAddress = addPrefecture(job.address)
     let coords = await geocodeGSI(fullAddress)
     let source = 'GSI'
     if (!coords) {
@@ -63,35 +80,41 @@ export async function POST() {
       source = 'Nominatim'
     }
 
+    const labelPrefix = job.kind === 'owner' ? '所有者住所 ' : ''
     if (coords) {
       const [lat, lng] = coords
-      const { error: ue } = await supabase
-        .from('properties')
-        .update({ lat, lng })
-        .eq('id', prop.id)
+      const patch = job.kind === 'owner' ? { owner_lat: lat, owner_lng: lng } : { lat, lng }
+      const { error: ue } = await supabase.from('properties').update(patch).eq('id', job.id)
       if (ue) {
-        log.push(`✖ DB更新失敗 ${prop.address.slice(0, 20)}: ${ue.message}`)
+        log.push(`✖ DB更新失敗 ${labelPrefix}${job.address.slice(0, 20)}: ${ue.message}`)
       } else {
         geocoded++
-        log.push(`✓ [${source}] ${prop.address.slice(0, 20)}`)
+        log.push(`✓ [${source}] ${labelPrefix}${job.address.slice(0, 20)}`)
       }
     } else {
-      await supabase.from('properties').update({ lat: 0, lng: 0 }).eq('id', prop.id)
-      log.push(`― 住所不明 ${prop.address.slice(0, 20)}`)
+      const patch = job.kind === 'owner' ? { owner_lat: 0, owner_lng: 0 } : { lat: 0, lng: 0 }
+      await supabase.from('properties').update(patch).eq('id', job.id)
+      log.push(`― 住所不明 ${labelPrefix}${job.address.slice(0, 20)}`)
     }
 
     await new Promise((r) => setTimeout(r, 300))
   }
 
-  const { count } = await supabase
+  const { count: addrCount } = await supabase
     .from('properties')
     .select('id', { count: 'exact', head: true })
     .or('lat.is.null,lat.eq.0')
+  const { count: ownerCount } = await supabase
+    .from('properties')
+    .select('id', { count: 'exact', head: true })
+    .is('owner_lat', null)
+    .not('owner_address', 'is', null)
 
+  const remaining = (addrCount ?? 0) + (ownerCount ?? 0)
   return NextResponse.json({
     geocoded,
-    remaining: count ?? 0,
-    done: (count ?? 0) === 0,
+    remaining,
+    done: remaining === 0,
     log,
   })
 }

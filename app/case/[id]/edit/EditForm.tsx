@@ -7,7 +7,8 @@ const inputCls = 'w-full rounded-xl border border-gray-200 px-4 py-3 text-sm tex
 const labelCls = 'text-xs text-gray-500 mb-1.5 block'
 
 export function EditForm({ c }: { c: Case }) {
-  const [address, setAddress]       = useState(c.address)
+  const [address, setAddress]           = useState(c.address)
+  const [ownerAddress, setOwnerAddress] = useState(c.ownerAddress ?? '')
   const [ownerName, setOwnerName]   = useState(c.ownerName)
   const [phone, setPhone]           = useState(c.phone ?? '')
   const [bankName, setBankName]     = useState(c.bankName ?? '')
@@ -22,7 +23,9 @@ export function EditForm({ c }: { c: Case }) {
     if (!address.trim()) { alert('住所を入力してください'); return }
     setSaving(true)
     await updateProperty(c.id, {
-      address:      address.trim(),
+      address:       address.trim(),
+      owner_address: ownerAddress.trim() || null,
+      owner_address_changed: ownerAddress.trim() !== (c.ownerAddress ?? ''),
       owner_name:   ownerName.trim(),
       phone:        phone.trim()      || null,
       bank_name:    bankName.trim()   || null,
@@ -44,6 +47,10 @@ export function EditForm({ c }: { c: Case }) {
         <div>
           <label className={labelCls}>所有者名</label>
           <input value={ownerName} onChange={(e) => setOwnerName(e.target.value)} className={inputCls} />
+        </div>
+        <div>
+          <label className={labelCls}>所有者住所（所在地と異なる場合・地図に別色ピンで表示）</label>
+          <input value={ownerAddress} onChange={(e) => setOwnerAddress(e.target.value)} placeholder="例: 京都市中京区〇〇町1-2-3" className={inputCls} />
         </div>
         <div>
           <label className={labelCls}>電話番号</label>

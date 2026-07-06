@@ -333,6 +333,10 @@ export default function MapPage() {
           </div>
         ))}
         <div className="flex items-center gap-1">
+          <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: '#e91e63' }} />
+          <span className="text-xs text-gray-600">所有者住所</span>
+        </div>
+        <div className="flex items-center gap-1">
           <div className="w-3 h-3 rounded-full shrink-0 bg-purple-600" />
           <span className="text-xs text-gray-600">メンバー</span>
         </div>

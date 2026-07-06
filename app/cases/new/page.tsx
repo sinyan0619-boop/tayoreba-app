@@ -16,7 +16,8 @@ function NewCaseForm() {
   const sp = useSearchParams()
   const initialCategory = (sp.get('category') ?? '任意売却') as CaseCategory
 
-  const [address, setAddress]       = useState('')
+  const [address, setAddress]           = useState('')
+  const [ownerAddress, setOwnerAddress] = useState('')
   const [ownerName, setOwnerName]   = useState('')
   const [status, setStatus]         = useState<CaseStatus>('未訪問')
   const [rank, setRank]             = useState<CaseRank>('C')
@@ -30,7 +31,8 @@ function NewCaseForm() {
     if (!address.trim()) { alert('住所を入力してください'); return }
     setSaving(true)
     await createProperty({
-      address:      address.trim(),
+      address:       address.trim(),
+      owner_address: ownerAddress.trim() || null,
       owner_name:   ownerName.trim() || '（未記入）',
       status,
       rank,
@@ -55,6 +57,10 @@ function NewCaseForm() {
           <div>
             <label className={labelCls}>所有者名</label>
             <input value={ownerName} onChange={(e) => setOwnerName(e.target.value)} placeholder="例: 山田 太郎" className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>所有者住所（所在地と異なる場合）</label>
+            <input value={ownerAddress} onChange={(e) => setOwnerAddress(e.target.value)} placeholder="例: 京都市中京区〇〇町1-2-3" className={inputCls} />
           </div>
           <div>
             <label className={labelCls}>電話番号</label>

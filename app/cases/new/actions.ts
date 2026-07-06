@@ -7,6 +7,7 @@ import { autoGeocode } from '@/lib/geocode'
 
 export async function createProperty(data: {
   address: string
+  owner_address: string | null
   owner_name: string
   status: CaseStatus
   rank: CaseRank
@@ -18,7 +19,7 @@ export async function createProperty(data: {
 }) {
   const { error } = await supabase.from('properties').insert(data)
   if (error) throw new Error(error.message)
-  autoGeocode(1).catch(() => {})
+  autoGeocode(data.owner_address ? 2 : 1).catch(() => {})
   revalidatePath('/cases')
   redirect(`/cases?category=${encodeURIComponent(data.category)}`)
 }

@@ -62,4 +62,31 @@ export async function autoGeocode(batches = 10): Promise<void> {
       await new Promise((r) => setTimeout(r, 300))
     }
   }
+
+  // 所有者住所（owner_address）の未配置分もジオコーディング
+  for (let i = 0; i < batches; i++) {
+    const { data: owners } = await supabase
+      .from('properties')
+      .select('id, owner_address')
+      .is('owner_lat', null)
+      .not('owner_address', 'is', null)
+      .limit(5)
+
+    if (!owners?.length) break
+
+    for (const prop of owners) {
+      if (!prop.owner_address?.trim()) continue
+      const fullAddress = addPrefecture(prop.owner_address)
+      let coords = await geocodeGSI(fullAddress)
+      if (!coords) coords = await geocodeNominatim(fullAddress)
+
+      if (coords) {
+        const [lat, lng] = coords
+        await supabase.from('properties').update({ owner_lat: lat, owner_lng: lng }).eq('id', prop.id)
+      } else {
+        await supabase.from('properties').update({ owner_lat: 0, owner_lng: 0 }).eq('id', prop.id)
+      }
+      await new Promise((r) => setTimeout(r, 300))
+    }
+  }
 }

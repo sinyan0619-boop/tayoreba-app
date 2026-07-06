@@ -102,6 +102,10 @@ export interface Case {
   lat: number;
   lng: number;
   isGeocoded?: boolean;
+  ownerAddress?: string;
+  ownerLat?: number;
+  ownerLng?: number;
+  isOwnerGeocoded?: boolean;
   haitoDate?: string;
   phone?: string;
   loanAmount?: number;
@@ -112,6 +116,13 @@ export interface Case {
   updatedAt?: string;
   visits: Visit[];
 }
+
+// 資料の分類（案件詳細で4分類を同時表示する）
+export const FILE_CATEGORIES = ['写真', '登記簿', '物件目録', 'その他'] as const;
+export type FileCategory = (typeof FILE_CATEGORIES)[number];
+
+// 所有者住所ピンの色（所在地ピンはステータス色で塗り分け）
+export const OWNER_PIN_COLOR = '#e91e63';
 
 export const STATUS_COLORS: Record<CaseStatus, string> = {
   '未訪問': '#f39c12',

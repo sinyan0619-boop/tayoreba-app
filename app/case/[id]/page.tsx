@@ -36,6 +36,9 @@ export default async function CaseDetailPage({ params }: Props) {
   const c = dbToCase(data);
 
   const mapsUrl = `https://maps.google.com/maps?q=${encodeURIComponent(c.address)}`;
+  const ownerMapsUrl = c.ownerAddress
+    ? `https://maps.google.com/maps?q=${encodeURIComponent(c.ownerAddress)}`
+    : null;
 
   return (
     <div className="flex flex-col h-full">
@@ -62,7 +65,15 @@ export default async function CaseDetailPage({ params }: Props) {
           <RankSelect   id={c.id} current={c.rank} />
 
           <div className="space-y-2 text-sm pt-1">
-            <Row label="住所"   value={c.address} />
+            <Row label="所在地" value={c.address} />
+            {c.ownerAddress && (
+              <Row label="所有者住所" value={
+                <span className="flex items-center gap-1.5 flex-wrap">
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: '#e91e63' }} />
+                  {c.ownerAddress}
+                </span>
+              } />
+            )}
             {c.haitoDate && (() => {
               const kigen = getHaitoKigen(c.haitoDate);
               return (
@@ -97,8 +108,18 @@ export default async function CaseDetailPage({ params }: Props) {
             rel="noopener noreferrer"
             className="flex items-center justify-center gap-2 bg-white border border-gray-200 rounded-xl py-3 text-sm font-medium text-gray-700 shadow-sm active:bg-gray-50"
           >
-            <span>🗺️</span> Googleマップ
+            <span>🗺️</span> 所在地マップ
           </a>
+          {ownerMapsUrl && (
+            <a
+              href={ownerMapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 bg-white border border-pink-200 rounded-xl py-3 text-sm font-medium text-pink-700 shadow-sm active:bg-pink-50"
+            >
+              <span>🏠</span> 所有者住所マップ
+            </a>
+          )}
           {c.phone && (
             <a
               href={`tel:${c.phone}`}

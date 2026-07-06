@@ -1,7 +1,7 @@
 'use client';
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useRef, useState } from 'react';
-import { Case, STATUS_COLORS } from '@/types';
+import { Case, STATUS_COLORS, OWNER_PIN_COLOR } from '@/types';
 
 export type UserLocation = {
   user_id: string;
@@ -77,6 +77,25 @@ export default function MapView({
               <span style="color:#666;font-size:11px">${c.address}</span><br/>
               <span style="color:${color};font-weight:bold">${c.status}</span>
               &nbsp;/&nbsp;ランク <strong>${c.rank}</strong><br/>
+              <span style="color:#3b82f6;font-size:11px;font-weight:bold">詳細を見る →</span>
+            </div>
+          </a>`
+        );
+        caseLayerRef.current.push(marker);
+      });
+
+      // 所有者住所ピン（所在地と別の場所に住む所有者へ会いに行くため・別色で表示）
+      cases.filter((c) => c.isOwnerGeocoded && c.ownerLat && c.ownerLng).forEach((c) => {
+        const marker = L.circleMarker([c.ownerLat!, c.ownerLng!], {
+          radius: 10, fillColor: OWNER_PIN_COLOR, color: '#ffffff',
+          weight: 2.5, opacity: 1, fillOpacity: 0.9, dashArray: '3',
+        }).addTo(mapRef.current);
+        marker.bindPopup(
+          `<a href="/case/${c.id}" style="text-decoration:none;color:inherit;display:block;min-width:160px">
+            <div style="font-size:13px;line-height:1.6">
+              <strong style="font-size:14px">🏠 ${c.ownerName}（所有者住所）</strong><br/>
+              <span style="color:#666;font-size:11px">${c.ownerAddress ?? ''}</span><br/>
+              <span style="color:#999;font-size:11px">物件: ${c.address}</span><br/>
               <span style="color:#3b82f6;font-size:11px;font-weight:bold">詳細を見る →</span>
             </div>
           </a>`
