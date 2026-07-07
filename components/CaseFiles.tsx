@@ -22,8 +22,12 @@ const SECTION_META: Record<FileCategory, { icon: string; label: string }> = {
 
 const IMAGE_TYPES = ['jpeg', 'jpg', 'png'];
 
+type SortKey = 'newest' | 'oldest' | 'name';
+const SORT_LABEL: Record<SortKey, string> = { newest: '新しい順', oldest: '古い順', name: '名前順' };
+
 export default function CaseFiles({ propertyId }: { propertyId: string }) {
   const [files, setFiles] = useState<CaseFile[]>([]);
+  const [sortKey, setSortKey] = useState<SortKey>('newest');
   const [uploading, setUploading] = useState<FileCategory | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const pendingCategory = useRef<FileCategory>('その他');
@@ -84,11 +88,32 @@ export default function CaseFiles({ propertyId }: { propertyId: string }) {
   const isImage = (f: CaseFile) => IMAGE_TYPES.includes(f.file_type ?? '');
 
   const byCategory = (cat: FileCategory) =>
-    files.filter((f) => (f.category ?? 'その他') === cat);
+    files
+      .filter((f) => (f.category ?? 'その他') === cat)
+      .sort((a, b) => {
+        if (sortKey === 'name') return a.file_name.localeCompare(b.file_name, 'ja');
+        const d = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        return sortKey === 'oldest' ? d : -d;
+      });
+
+  const cycleSort = () => {
+    setSortKey((k) => (k === 'newest' ? 'oldest' : k === 'oldest' ? 'name' : 'newest'));
+  };
 
   return (
     <div className="space-y-4">
       <input ref={inputRef} type="file" multiple className="hidden" onChange={handleUpload} />
+
+      {files.length > 1 && (
+        <div className="flex justify-end">
+          <button
+            onClick={cycleSort}
+            className="text-xs text-gray-500 bg-white border border-gray-200 px-3 py-1.5 rounded-full shadow-sm active:bg-gray-50"
+          >
+            ↕️ 並び順: {SORT_LABEL[sortKey]}
+          </button>
+        </div>
+      )}
 
       {FILE_CATEGORIES.map((cat) => {
         const meta = SECTION_META[cat];
