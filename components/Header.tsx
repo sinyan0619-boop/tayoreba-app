@@ -10,8 +10,9 @@ interface Props {
 }
 
 const MENU_ITEMS = [
-  { href: '/report',  label: '日報',       icon: '📝' },
-  { href: '/account', label: 'アカウント', icon: '👤' },
+  { href: '/report',        label: '日報',       icon: '📝' },
+  { href: '/line-reports',  label: '未処理報告', icon: '📨' },
+  { href: '/account',       label: 'アカウント', icon: '👤' },
 ];
 
 export default function Header({ title, backHref, right }: Props) {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { addPrefecture } from '@/lib/address';
 import { autoGeocode } from '@/lib/geocode';
 import { createAdminClient } from '@/lib/supabase';
+import { normalizeAddress, caseKeyFromShorthand, caseKeyFromTitle } from '@/lib/normalize';
 
 export const runtime    = 'nodejs';
 export const dynamic    = 'force-dynamic';
@@ -30,14 +31,21 @@ async function replyLine(replyToken: string, text: string, token: string) {
 }
 
 // ── line_context ──────────────────────────────────────────────
+// グループ発言は "{groupId}:{userId}"、1対1は userId をキーにして会話状態を分離する
+function contextKeyOf(lineUserId: string, groupId?: string | null): string {
+  return groupId ? `${groupId}:${lineUserId}` : lineUserId;
+}
+
 interface LineContext {
   haitoDate: string;
   updatedAt: Date;
   propertyId?: string;
   candidates?: { id: string; name: string; address: string }[];
+  lastReportPropertyId?: string;
+  lastReportAt?: Date;
 }
 
-async function saveHaitoDate(lineUserId: string, haitoDate: string, sbUrl: string, sbKey: string) {
+async function saveHaitoDate(contextKey: string, haitoDate: string, sbUrl: string, sbKey: string) {
   await fetch(`${sbUrl}/rest/v1/line_context`, {
     method: 'POST',
     headers: {
@@ -45,29 +53,30 @@ async function saveHaitoDate(lineUserId: string, haitoDate: string, sbUrl: strin
       'apikey': sbKey, 'Authorization': `Bearer ${sbKey}`,
       'Prefer': 'resolution=merge-duplicates',
     },
-    body: JSON.stringify({ line_user_id: lineUserId, haito_date: haitoDate, updated_at: new Date().toISOString() }),
+    body: JSON.stringify({ context_key: contextKey, line_user_id: contextKey, haito_date: haitoDate, updated_at: new Date().toISOString() }),
   });
 }
 
-async function getStoredContext(lineUserId: string, sbUrl: string, sbKey: string): Promise<LineContext | null> {
+async function getStoredContext(contextKey: string, sbUrl: string, sbKey: string): Promise<LineContext | null> {
   const res = await fetch(
-    `${sbUrl}/rest/v1/line_context?line_user_id=eq.${encodeURIComponent(lineUserId)}&select=haito_date,updated_at,property_id,candidates`,
+    `${sbUrl}/rest/v1/line_context?context_key=eq.${encodeURIComponent(contextKey)}&select=haito_date,updated_at,property_id,candidates,last_report_property_id,last_report_at`,
     { headers: { 'apikey': sbKey, 'Authorization': `Bearer ${sbKey}` } }
   );
   if (!res.ok) return null;
-  const data: { haito_date: string; updated_at: string; property_id?: string | null; candidates?: string | null }[] = await res.json();
+  const data: { haito_date: string; updated_at: string; property_id?: string | null; candidates?: string | null; last_report_property_id?: string | null; last_report_at?: string | null }[] = await res.json();
   if (!data[0]) return null;
   const updatedAt = new Date(data[0].updated_at);
-  if ((Date.now() - updatedAt.getTime()) / 3600000 > 24) return null;
   return {
     haitoDate: data[0].haito_date,
     updatedAt,
-    propertyId: data[0].property_id ?? undefined,
+    propertyId: (Date.now() - updatedAt.getTime()) / 3600000 <= 24 ? data[0].property_id ?? undefined : undefined,
     candidates: data[0].candidates ? JSON.parse(data[0].candidates) : undefined,
+    lastReportPropertyId: data[0].last_report_property_id ?? undefined,
+    lastReportAt: data[0].last_report_at ? new Date(data[0].last_report_at) : undefined,
   };
 }
 
-async function patchContext(lineUserId: string, patch: Record<string, unknown>, sbUrl: string, sbKey: string) {
+async function patchContext(contextKey: string, patch: Record<string, unknown>, sbUrl: string, sbKey: string) {
   await fetch(`${sbUrl}/rest/v1/line_context`, {
     method: 'POST',
     headers: {
@@ -75,13 +84,13 @@ async function patchContext(lineUserId: string, patch: Record<string, unknown>, 
       'apikey': sbKey, 'Authorization': `Bearer ${sbKey}`,
       'Prefer': 'resolution=merge-duplicates',
     },
-    body: JSON.stringify({ line_user_id: lineUserId, updated_at: new Date().toISOString(), ...patch }),
+    body: JSON.stringify({ context_key: contextKey, line_user_id: contextKey, updated_at: new Date().toISOString(), ...patch }),
   });
 }
 
-async function clearAttachContext(lineUserId: string, sbUrl: string, sbKey: string) {
+async function clearAttachContext(contextKey: string, sbUrl: string, sbKey: string) {
   await fetch(
-    `${sbUrl}/rest/v1/line_context?line_user_id=eq.${encodeURIComponent(lineUserId)}`,
+    `${sbUrl}/rest/v1/line_context?context_key=eq.${encodeURIComponent(contextKey)}`,
     {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'apikey': sbKey, 'Authorization': `Bearer ${sbKey}` },
@@ -90,9 +99,231 @@ async function clearAttachContext(lineUserId: string, sbUrl: string, sbKey: stri
   );
 }
 
+// 報告直後の写真を自動追従添付するため、直近登録先案件を記憶する
+async function markLastReport(contextKey: string, propertyId: string, sbUrl: string, sbKey: string) {
+  await patchContext(contextKey, { last_report_property_id: propertyId, last_report_at: new Date().toISOString() }, sbUrl, sbKey);
+}
+
+// ── 報告者マッピング（LINEユーザー → 担当者名） ──────────────────
+async function getLineDisplayName(userId: string, token: string, groupId?: string | null): Promise<string | null> {
+  const url = groupId
+    ? `https://api.line.me/v2/bot/group/${groupId}/member/${userId}`
+    : `https://api.line.me/v2/bot/profile/${userId}`;
+  try {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.displayName ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function getOrCreateReporter(userId: string, token: string, groupId: string | undefined, sbUrl: string, sbKey: string): Promise<{ displayName: string | null; assignee: string | null }> {
+  const res = await fetch(
+    `${sbUrl}/rest/v1/line_reporters?line_user_id=eq.${encodeURIComponent(userId)}&select=display_name,assignee`,
+    { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` } }
+  );
+  const rows: { display_name: string | null; assignee: string | null }[] = res.ok ? await res.json() : [];
+  if (rows[0]) return { displayName: rows[0].display_name, assignee: rows[0].assignee };
+
+  const displayName = await getLineDisplayName(userId, token, groupId);
+  await fetch(`${sbUrl}/rest/v1/line_reporters`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}`, Prefer: 'resolution=ignore-duplicates' },
+    body: JSON.stringify({ line_user_id: userId, display_name: displayName, assignee: null }),
+  });
+  return { displayName, assignee: null };
+}
+
+// ── 報告テキスト解析（Claude） ────────────────────────────────
+interface ParsedReport {
+  is_report: boolean;
+  address?: string;
+  owner_name?: string;
+  case_shorthand?: string;
+  visit_result?: '不在' | '対応済み' | '再訪問' | '対象外' | '要連絡' | null;
+  memo?: string;
+  next_action?: string;
+  tasha_hata?: boolean; // 他社の旗あり
+}
+
+async function parseReportWithClaude(text: string): Promise<ParsedReport> {
+  const { default: Anthropic } = await import('@anthropic-ai/sdk');
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const message = await anthropic.messages.create({
+    model: 'claude-opus-4-7',
+    max_tokens: 512,
+    messages: [{
+      role: 'user',
+      content: `以下は不動産営業の現地訪問報告のLINEメッセージかもしれません。JSON形式で解析してください。
+
+メッセージ: "${text}"
+
+出力形式（JSONのみ、他のテキストは含めない）:
+{
+  "is_report": true/false,
+  "address": "住所（記載があれば）",
+  "owner_name": "所有者・お客様氏名（記載があれば）",
+  "case_shorthand": "事件番号の短縮形。例: 令和8年(ヌ)第4号 → 8ヌ4",
+  "visit_result": "不在" | "対応済み" | "再訪問" | "対象外" | "要連絡" | null,
+  "memo": "報告内容の要約（現地の状況）",
+  "next_action": "次のアクション（記載があれば）",
+  "tasha_hata": true/false（「他社の旗」「競合の看板」等の記載があればtrue）
+}
+
+is_report は、雑談・業務連絡・スタンプへの反応など訪問報告でない場合は false にしてください。`,
+    }],
+  });
+  const textOut = message.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as { type: 'text'; text: string }).text)
+    .join('');
+  const match = textOut.match(/\{[\s\S]*\}/);
+  if (!match) return { is_report: false };
+  try {
+    return JSON.parse(match[0]);
+  } catch {
+    return { is_report: false };
+  }
+}
+
+// ── 報告 → 案件マッチング ────────────────────────────────────
+interface PropertyRow {
+  id: string;
+  owner_name: string;
+  address: string;
+  case_number: string | null;
+  status: string;
+  assignee: string | null;
+  notes: string | null;
+}
+
+async function matchReportToProperty(parsed: ParsedReport, sbUrl: string, sbKey: string): Promise<PropertyRow[]> {
+  // ①事件番号（最優先・確度が高い）
+  if (parsed.case_shorthand) {
+    const key = caseKeyFromShorthand(parsed.case_shorthand);
+    if (key) {
+      const res = await fetch(
+        `${sbUrl}/rest/v1/properties?select=id,owner_name,address,case_number,status,assignee,notes&order=updated_at.desc&limit=200`,
+        { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` } }
+      );
+      const rows: PropertyRow[] = res.ok ? await res.json() : [];
+      const hit = rows.filter((r) => caseKeyFromTitle(r.case_number) === key);
+      if (hit.length) return hit;
+    }
+  }
+  // ②住所（正規化して前方一致）
+  if (parsed.address) {
+    const na = normalizeAddress(parsed.address);
+    if (na.length >= 6) {
+      const res = await fetch(
+        `${sbUrl}/rest/v1/properties?select=id,owner_name,address,case_number,status,assignee,notes&order=updated_at.desc&limit=500`,
+        { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` } }
+      );
+      const rows: PropertyRow[] = res.ok ? await res.json() : [];
+      const hit = rows.filter((r) => {
+        const ra = normalizeAddress(r.address);
+        return ra && (ra.startsWith(na) || na.startsWith(ra));
+      });
+      if (hit.length) return hit;
+    }
+  }
+  // ③所有者名（部分一致）
+  if (parsed.owner_name) {
+    const q = encodeURIComponent(parsed.owner_name);
+    const res = await fetch(
+      `${sbUrl}/rest/v1/properties?owner_name=ilike.*${q}*&select=id,owner_name,address,case_number,status,assignee,notes&order=updated_at.desc&limit=5`,
+      { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` } }
+    );
+    if (res.ok) {
+      const rows: PropertyRow[] = await res.json();
+      if (rows.length) return rows;
+    }
+  }
+  return [];
+}
+
+const RESULT_JUDGMENT: Record<string, '○' | '△' | '✖'> = {
+  '対応済み': '○', '要連絡': '○',
+  '再訪問': '△', '不在': '△',
+  '対象外': '✖',
+};
+
+// 報告内容から案件を更新（訪問記録追加・ステータス/担当・備考の安全な更新）
+async function applyReportToProperty(
+  prop: PropertyRow,
+  parsed: ParsedReport,
+  reporterName: string,
+  assignee: string | null,
+  sbUrl: string,
+  sbKey: string,
+) {
+  // 訪問記録を追加（既存記録は上書きしない）
+  await fetch(`${sbUrl}/rest/v1/visits`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+    body: JSON.stringify({
+      property_id: prop.id,
+      contact_type: 'LINE報告',
+      summary: parsed.memo ?? null,
+      judgment: parsed.visit_result ? RESULT_JUDGMENT[parsed.visit_result] ?? null : null,
+      next_action: parsed.next_action ?? null,
+      recorded_by: reporterName,
+    }),
+  });
+
+  // ステータスは安全な方向にのみ自動遷移させる
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (parsed.tasha_hata) {
+    patch.status = '訪問対象外';
+  } else if (parsed.visit_result === '対象外') {
+    patch.status = '訪問対象外';
+  } else if (prop.status === '未訪問' && parsed.visit_result) {
+    patch.status = '訪問対象';
+  }
+  if (!prop.assignee && assignee) {
+    patch.assignee = assignee;
+  }
+  if (parsed.memo) {
+    const stamp = new Date().toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' });
+    const line = `${stamp} ${reporterName}: ${parsed.memo}`;
+    patch.notes = prop.notes ? `${line}\n${prop.notes}` : line;
+  }
+  await fetch(`${sbUrl}/rest/v1/properties?id=eq.${prop.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+    body: JSON.stringify(patch),
+  });
+}
+
+async function logReport(
+  groupId: string | undefined,
+  lineUserId: string,
+  rawText: string,
+  parsed: ParsedReport | null,
+  propertyId: string | null,
+  status: 'processed' | 'unmatched' | 'ignored',
+  sbUrl: string,
+  sbKey: string,
+) {
+  await fetch(`${sbUrl}/rest/v1/line_reports`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+    body: JSON.stringify({
+      group_id: groupId ?? null,
+      line_user_id: lineUserId,
+      raw_text: rawText,
+      parsed: parsed ?? null,
+      property_id: propertyId,
+      status,
+    }),
+  });
+}
+
 // 直近バッチの配当日を一括修正
-async function fixRecentBatch(lineUserId: string, newDate: string, sbUrl: string, sbKey: string): Promise<number> {
-  const ctx = await getStoredContext(lineUserId, sbUrl, sbKey);
+async function fixRecentBatch(contextKey: string, newDate: string, sbUrl: string, sbKey: string): Promise<number> {
+  const ctx = await getStoredContext(contextKey, sbUrl, sbKey);
   if (!ctx) return 0;
   const windowStart = new Date(ctx.updatedAt.getTime() - 2 * 3600000).toISOString();
   const res = await fetch(
@@ -152,6 +383,7 @@ async function uploadCaseFile(
   mimeType: string,
   fileName: string,
   propertyId: string,
+  category: string = 'その他',
 ): Promise<boolean> {
   const admin = createAdminClient();
   const storagePath = `${propertyId}/${Date.now()}_${fileName}`;
@@ -167,6 +399,7 @@ async function uploadCaseFile(
     file_path: storagePath,
     file_type: fileType,
     file_size: buffer.length,
+    category,
   });
   if (dbError) {
     await admin.storage.from('case-files').remove([storagePath]);
@@ -273,6 +506,8 @@ export async function POST(req: NextRequest) {
     if (event.type !== 'message') continue;
     const { replyToken, message } = event;
     const lineUserId: string = event.source?.userId ?? 'unknown';
+    const groupId: string | undefined = event.source?.type === 'group' ? event.source.groupId : undefined;
+    const contextKey = contextKeyOf(lineUserId, groupId);
 
     // ── テキストメッセージ ──────────────────────────────────
     if (message.type === 'text') {
@@ -280,12 +515,12 @@ export async function POST(req: NextRequest) {
 
       // 「1」〜「5」の数字 → 候補から選択
       if (/^[1-5]$/.test(text)) {
-        const ctx = await getStoredContext(lineUserId, sbUrl, sbKey);
+        const ctx = await getStoredContext(contextKey, sbUrl, sbKey);
         if (ctx?.candidates && ctx.candidates.length > 0) {
           const idx = parseInt(text, 10) - 1;
           const chosen = ctx.candidates[idx];
           if (chosen) {
-            await patchContext(lineUserId, { property_id: chosen.id, candidates: null }, sbUrl, sbKey);
+            await patchContext(contextKey, { property_id: chosen.id, candidates: null }, sbUrl, sbKey);
             await replyLine(
               replyToken,
               `📎 添付モード\n案件：${chosen.name}\n住所：${chosen.address}\n\n次に送った画像・PDFがこの案件に資料として追加されます。`,
@@ -313,7 +548,7 @@ export async function POST(req: NextRequest) {
 
         if (results.length === 1) {
           const prop = results[0];
-          await patchContext(lineUserId, { property_id: prop.id, candidates: null }, sbUrl, sbKey);
+          await patchContext(contextKey, { property_id: prop.id, candidates: null }, sbUrl, sbKey);
           await replyLine(
             replyToken,
             `📎 添付モード\n案件：${prop.owner_name}\n住所：${prop.address}\n\n次に送った画像・PDFがこの案件に資料として追加されます。`,
@@ -324,7 +559,7 @@ export async function POST(req: NextRequest) {
 
         // 複数ヒット → 番号リスト表示
         const candidates = results.map((r) => ({ id: r.id, name: r.owner_name, address: r.address }));
-        await patchContext(lineUserId, { candidates: JSON.stringify(candidates), property_id: null }, sbUrl, sbKey);
+        await patchContext(contextKey, { candidates: JSON.stringify(candidates), property_id: null }, sbUrl, sbKey);
         const listText = candidateListText(candidates);
         const header = keyword ? `「${keyword}」の検索結果（${results.length}件）` : `最近の案件（${results.length}件）`;
         await replyLine(
@@ -339,8 +574,8 @@ export async function POST(req: NextRequest) {
       if (text.includes('修正')) {
         const newDate = extractDate(text);
         if (newDate) {
-          const count = await fixRecentBatch(lineUserId, newDate, sbUrl, sbKey);
-          await saveHaitoDate(lineUserId, newDate, sbUrl, sbKey);
+          const count = await fixRecentBatch(contextKey, newDate, sbUrl, sbKey);
+          await saveHaitoDate(contextKey, newDate, sbUrl, sbKey);
           await replyLine(
             replyToken,
             count > 0
@@ -352,16 +587,55 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 日付のみ → 配当日を設定
-      const dateStr = extractDate(text);
+      // 日付のみ → 配当日を設定（数字/事件番号/日付以外はテキストとして続く報告解析に回る）
+      const dateStr = /^\d{4}[年\/\-]\d{1,2}[月\/\-]\d{1,2}日?$/.test(text) ? extractDate(text) : null;
       if (dateStr) {
-        await saveHaitoDate(lineUserId, dateStr, sbUrl, sbKey);
+        await saveHaitoDate(contextKey, dateStr, sbUrl, sbKey);
         await replyLine(
           replyToken,
           `📅 配当日を ${dateStr} に設定しました。\n次に送った画像にこの日付が使われます。\n※24時間で自動リセットされます。\n\n日付を間違えた場合：「修正 YYYY-MM-DD」と送ってください。`,
           token
         );
         continue;
+      }
+
+      // 現地訪問報告として解析を試みる（雑談・業務連絡は is_report:false で無視）
+      try {
+        const parsed = await parseReportWithClaude(text);
+        if (parsed.is_report) {
+          const reporter = await getOrCreateReporter(lineUserId, token, groupId, sbUrl, sbKey);
+          const reporterName = reporter.displayName ?? '不明';
+          const candidates = await matchReportToProperty(parsed, sbUrl, sbKey);
+
+          if (candidates.length === 1) {
+            const prop = candidates[0];
+            await applyReportToProperty(prop, parsed, reporterName, reporter.assignee, sbUrl, sbKey);
+            await markLastReport(contextKey, prop.id, sbUrl, sbKey);
+            await logReport(groupId, lineUserId, text, parsed, prop.id, 'processed', sbUrl, sbKey);
+            await replyLine(replyToken, `✅ ${prop.owner_name}様（${prop.address}）に記録しました`, token);
+            continue;
+          }
+
+          if (candidates.length > 1) {
+            const listCandidates = candidates.slice(0, 5).map((r) => ({ id: r.id, name: r.owner_name, address: r.address }));
+            await patchContext(contextKey, { candidates: JSON.stringify(listCandidates), property_id: null }, sbUrl, sbKey);
+            await replyLine(
+              replyToken,
+              `📎 案件を特定できませんでした。該当しそうな案件（${listCandidates.length}件）\n\n${candidateListText(listCandidates)}\n\n番号を送ると選択できます。`,
+              token
+            );
+            await logReport(groupId, lineUserId, text, parsed, null, 'unmatched', sbUrl, sbKey);
+            continue;
+          }
+
+          // 0件 → 未処理として記録し、アプリの一覧から後で手動紐付けできるようにする
+          await logReport(groupId, lineUserId, text, parsed, null, 'unmatched', sbUrl, sbKey);
+          await replyLine(replyToken, '📝 報告を受け取りましたが、該当する案件を特定できませんでした。\nアプリの「未処理報告」から手動で紐付けできます。', token);
+          continue;
+        }
+      } catch (err: any) {
+        console.error('Report parse error:', err?.message);
+        // 解析エラー時はヘルプにフォールバック
       }
 
       // ヘルプ
@@ -377,16 +651,27 @@ export async function POST(req: NextRequest) {
     if (message.type === 'image') {
       try {
         const { buffer, mimeType } = await getLineContent(message.id, token);
-        const ctx = await getStoredContext(lineUserId, sbUrl, sbKey);
+        const ctx = await getStoredContext(contextKey, sbUrl, sbKey);
 
-        // 添付モード
+        // 添付モード（「添付」コマンドで明示的に指定した案件）
         if (ctx?.propertyId) {
           const ext = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
           const fileName = `LINE_${Date.now()}.${ext}`;
-          const ok = await uploadCaseFile(buffer, mimeType, fileName, ctx.propertyId);
-          await clearAttachContext(lineUserId, sbUrl, sbKey);
+          const ok = await uploadCaseFile(buffer, mimeType, fileName, ctx.propertyId, '写真');
+          await clearAttachContext(contextKey, sbUrl, sbKey);
           await replyLine(replyToken, ok ? '✅ 画像を案件の資料に追加しました。' : '⚠️ ファイルの保存に失敗しました。', token);
           continue;
+        }
+
+        // 報告直後（15分以内）の写真は自動で同じ案件に追従添付する
+        if (ctx?.lastReportPropertyId && ctx.lastReportAt && (Date.now() - ctx.lastReportAt.getTime()) / 60000 <= 15) {
+          const ext = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
+          const fileName = `LINE_${Date.now()}.${ext}`;
+          const ok = await uploadCaseFile(buffer, mimeType, fileName, ctx.lastReportPropertyId, '写真');
+          if (ok) {
+            await markLastReport(contextKey, ctx.lastReportPropertyId, sbUrl, sbKey); // 15分カウントを延長
+            continue; // 報告フローの写真は毎回返信しない（グループを騒がせない）
+          }
         }
 
         // OCRモード
@@ -453,7 +738,7 @@ export async function POST(req: NextRequest) {
           insertedCount = inserted.length;
         }
         autoGeocode(3).catch(() => {});
-        await saveHaitoDate(lineUserId, usedHaitoDate, sbUrl, sbKey);
+        await saveHaitoDate(contextKey, usedHaitoDate, sbUrl, sbKey);
 
         const dateLabel = ctx ? `${usedHaitoDate}（設定済み）` : `${usedHaitoDate}（送信日）`;
         const summary = [insertedCount > 0 ? `新規${insertedCount}件` : null, updateCount > 0 ? `更新${updateCount}件` : null].filter(Boolean).join('・') || '変更なし';
@@ -481,7 +766,7 @@ export async function POST(req: NextRequest) {
     // ── PDFファイル ─────────────────────────────────────────
     if (message.type === 'file') {
       try {
-        const ctx = await getStoredContext(lineUserId, sbUrl, sbKey);
+        const ctx = await getStoredContext(contextKey, sbUrl, sbKey);
         if (!ctx?.propertyId) {
           await replyLine(replyToken, '📎 資料を添付するには先に「添付」と送って案件を選んでください。', token);
           continue;
@@ -489,7 +774,7 @@ export async function POST(req: NextRequest) {
         const { buffer, mimeType } = await getLineContent(message.id, token);
         const fileName = (message.fileName as string | undefined) ?? `LINE_${Date.now()}.pdf`;
         const ok = await uploadCaseFile(buffer, mimeType || 'application/pdf', fileName, ctx.propertyId);
-        await clearAttachContext(lineUserId, sbUrl, sbKey);
+        await clearAttachContext(contextKey, sbUrl, sbKey);
         await replyLine(replyToken, ok ? `✅ ${fileName} を案件の資料に追加しました。` : '⚠️ ファイルの保存に失敗しました。', token);
       } catch (err: any) {
         console.error('File handler error:', err?.message);
