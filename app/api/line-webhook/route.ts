@@ -3,6 +3,7 @@ import { addPrefecture } from '@/lib/address';
 import { autoGeocode } from '@/lib/geocode';
 import { createAdminClient } from '@/lib/supabase';
 import { normalizeAddress, caseKeyFromShorthand, caseKeyFromTitle } from '@/lib/normalize';
+import { createNotionCase } from '@/lib/notion';
 
 export const runtime    = 'nodejs';
 export const dynamic    = 'force-dynamic';
@@ -736,6 +737,22 @@ export async function POST(req: NextRequest) {
           if (!insertRes.ok) throw new Error(`Insert failed: ${insertRes.status} ${await insertRes.text()}`);
           const inserted: { id: string }[] = await insertRes.json();
           insertedCount = inserted.length;
+
+          // Notion案件DBへも自動登録（アプリ登録が主・Notionは失敗しても続行）
+          for (const row of toInsert as any[]) {
+            try {
+              const r = await createNotionCase({
+                address: row.address,
+                ownerName: row.owner_name,
+                caseNumber: row.case_number,
+                haitoDate: row.haito_date,
+                notes: row.notes,
+              });
+              console.log('Notion sync:', r, row.address?.slice(0, 20));
+            } catch (e: any) {
+              console.error('Notion sync failed:', e?.message);
+            }
+          }
         }
         autoGeocode(3).catch(() => {});
         await saveHaitoDate(contextKey, usedHaitoDate, sbUrl, sbKey);
