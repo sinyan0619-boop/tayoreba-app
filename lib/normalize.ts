@@ -33,3 +33,17 @@ export function caseKeyFromTitle(text: string | null | undefined): string | null
   const m = s.match(/令和(\d+)年.{0,12}?[（(](ケ|ヌ)[）)]\s*第(\d+)号/);
   return m ? `R${m[1]}-${m[2]}-${m[3]}` : null;
 }
+
+// 「大阪ヌ127」「尼崎ケ30」「令和8年(ヌ)第4号」などを比較用キーへ変換する。
+// 裁判所名だけの短縮形には年度が無いため、年度付きキーとは分けて安全に照合する。
+export function normalizeCaseReference(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const s = text.normalize('NFKC').replace(/[\s　()（）第号年]/g, '');
+  const full = s.match(/令和(\d+)(ケ|ヌ)(\d+)/);
+  if (full) return `R${full[1]}-${full[2]}-${full[3]}`;
+  const court = s.match(/(大阪|京都|神戸|尼崎|滋賀|奈良)(ケ|ヌ)(\d+)/);
+  if (court) return `${court[1]}-${court[2]}-${court[3]}`;
+  const short = s.match(/^(\d+)(ケ|ヌ)(\d+)$/);
+  if (short) return `R${short[1]}-${short[2]}-${short[3]}`;
+  return null;
+}

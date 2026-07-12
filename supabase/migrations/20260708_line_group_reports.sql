@@ -46,3 +46,14 @@ BEGIN
     CREATE POLICY allow_all ON line_reports FOR ALL USING (true) WITH CHECK (true);
   END IF;
 END $$;
+
+-- 2026-07-09追加: 報告より先に届いた画像の一時保持（案件確定時に自動添付）
+CREATE TABLE IF NOT EXISTS line_pending_images (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  context_key  TEXT NOT NULL,
+  file_path    TEXT NOT NULL,
+  file_name    TEXT NOT NULL,
+  file_size    INTEGER,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pending_images_key ON line_pending_images(context_key, created_at DESC);

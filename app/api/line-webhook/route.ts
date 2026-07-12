@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { addPrefecture } from '@/lib/address';
 import { autoGeocode } from '@/lib/geocode';
 import { createAdminClient } from '@/lib/supabase';
-import { normalizeAddress, caseKeyFromShorthand, caseKeyFromTitle } from '@/lib/normalize';
-import { createNotionCase } from '@/lib/notion';
+import { normalizeAddress, caseKeyFromShorthand, caseKeyFromTitle, normalizeCaseReference } from '@/lib/normalize';
+import { createNotionCase, updateNotionCaseFromLine } from '@/lib/notion';
 
 export const runtime    = 'nodejs';
 export const dynamic    = 'force-dynamic';
@@ -147,9 +147,41 @@ interface ParsedReport {
   memo?: string;
   next_action?: string;
   tasha_hata?: boolean; // 他社の旗あり
+  reains_none?: boolean;
+  vacancy_suspected?: boolean;
+  document_hints?: string[];
+}
+
+function parseReportLocally(text: string): Partial<ParsedReport> {
+  const normalized = text.normalize('NFKC');
+  const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const caseRef = normalized.match(/(?:大阪|京都|神戸|尼崎|滋賀|奈良)\s*[ケヌ]\s*\d+/)?.[0]?.replace(/\s/g, '');
+  const addressLine = lines.find((line) => /(?:市|区|町|村).*(?:丁目|番|号|\d)/.test(line) && !/不在|資料|レインズ/.test(line));
+  const visitResult = /不在/.test(normalized) ? '不在'
+    : /対象外/.test(normalized) ? '対象外'
+    : /再訪/.test(normalized) ? '再訪問'
+    : /面談|本人対応|応対|接触/.test(normalized) ? '対応済み'
+    : null;
+  const hints = [
+    /登記/.test(normalized) ? '登記簿' : null,
+    /物件目録|配当一覧/.test(normalized) ? '物件目録' : null,
+    /図面|間取り/.test(normalized) ? '図面・間取り' : null,
+    /媒介/.test(normalized) ? '媒介書類' : null,
+    /他社資料/.test(normalized) ? '他社資料' : null,
+  ].filter((value): value is string => Boolean(value));
+  return {
+    is_report: Boolean(caseRef || addressLine) && Boolean(visitResult || /レインズ|空き家|資料|電気/.test(normalized)),
+    case_shorthand: caseRef,
+    address: addressLine,
+    visit_result: visitResult,
+    reains_none: /レインズ\s*(?:なし|無し|無)/.test(normalized),
+    vacancy_suspected: /空き家|空家|電気(?:が)?(?:ついて|点いて)?いない/.test(normalized),
+    document_hints: hints,
+  };
 }
 
 async function parseReportWithClaude(text: string): Promise<ParsedReport> {
+  const local = parseReportLocally(text);
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const message = await anthropic.messages.create({
@@ -166,7 +198,7 @@ async function parseReportWithClaude(text: string): Promise<ParsedReport> {
   "is_report": true/false,
   "address": "住所（記載があれば）",
   "owner_name": "所有者・お客様氏名（記載があれば）",
-  "case_shorthand": "事件番号の短縮形。例: 令和8年(ヌ)第4号 → 8ヌ4",
+  "case_shorthand": "事件番号。大阪ヌ127・尼崎ケ30のような裁判所付き短縮形はそのまま保持。令和8年(ヌ)第4号 → 8ヌ4",
   "visit_result": "不在" | "対応済み" | "再訪問" | "対象外" | "要連絡" | null,
   "memo": "報告内容の要約（現地の状況）",
   "next_action": "次のアクション（記載があれば）",
@@ -183,9 +215,19 @@ is_report は、雑談・業務連絡・スタンプへの反応など訪問報�
   const match = textOut.match(/\{[\s\S]*\}/);
   if (!match) return { is_report: false };
   try {
-    return JSON.parse(match[0]);
+    const ai = JSON.parse(match[0]) as ParsedReport;
+    return {
+      ...ai,
+      is_report: ai.is_report || Boolean(local.is_report),
+      case_shorthand: local.case_shorthand || ai.case_shorthand,
+      address: ai.address || local.address,
+      visit_result: ai.visit_result || local.visit_result,
+      reains_none: local.reains_none,
+      vacancy_suspected: local.vacancy_suspected,
+      document_hints: local.document_hints,
+    };
   } catch {
-    return { is_report: false };
+    return { is_report: Boolean(local.is_report), ...local } as ParsedReport;
   }
 }
 
@@ -203,6 +245,7 @@ interface PropertyRow {
 async function matchReportToProperty(parsed: ParsedReport, sbUrl: string, sbKey: string): Promise<PropertyRow[]> {
   // ①事件番号（最優先・確度が高い）
   if (parsed.case_shorthand) {
+    const directKey = normalizeCaseReference(parsed.case_shorthand);
     const key = caseKeyFromShorthand(parsed.case_shorthand);
     if (key) {
       const res = await fetch(
@@ -210,7 +253,16 @@ async function matchReportToProperty(parsed: ParsedReport, sbUrl: string, sbKey:
         { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` } }
       );
       const rows: PropertyRow[] = res.ok ? await res.json() : [];
-      const hit = rows.filter((r) => caseKeyFromTitle(r.case_number) === key);
+      const hit = rows.filter((r) => caseKeyFromTitle(r.case_number) === key || (directKey && normalizeCaseReference(r.case_number) === directKey));
+      if (hit.length) return hit;
+    }
+    if (directKey) {
+      const res = await fetch(
+        `${sbUrl}/rest/v1/properties?select=id,owner_name,address,case_number,status,assignee,notes&order=updated_at.desc&limit=500`,
+        { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` } }
+      );
+      const rows: PropertyRow[] = res.ok ? await res.json() : [];
+      const hit = rows.filter((r) => normalizeCaseReference(r.case_number) === directKey);
       if (hit.length) return hit;
     }
   }
@@ -291,11 +343,32 @@ async function applyReportToProperty(
     const line = `${stamp} ${reporterName}: ${parsed.memo}`;
     patch.notes = prop.notes ? `${line}\n${prop.notes}` : line;
   }
+  const flags = [
+    parsed.reains_none ? 'レインズなし' : null,
+    parsed.vacancy_suspected ? '空き家の可能性' : null,
+    parsed.document_hints?.length ? `資料: ${parsed.document_hints.join('・')}` : null,
+  ].filter(Boolean).join(' / ');
+  if (flags && !String(patch.notes ?? prop.notes ?? '').includes(flags)) {
+    patch.notes = `${flags}\n${String(patch.notes ?? prop.notes ?? '')}`.trim();
+  }
   await fetch(`${sbUrl}/rest/v1/properties?id=eq.${prop.id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
     body: JSON.stringify(patch),
   });
+  try {
+    await updateNotionCaseFromLine({
+      address: prop.address,
+      caseNumber: prop.case_number,
+      visitResult: parsed.visit_result ?? null,
+      memo: parsed.memo ?? (flags || null),
+      nextAction: parsed.next_action ?? (parsed.visit_result === '不在' ? '時間帯を変えて再訪' : null),
+      reainsNone: Boolean(parsed.reains_none),
+      vacancySuspected: Boolean(parsed.vacancy_suspected),
+    });
+  } catch (e: any) {
+    console.error('Notion LINE update failed:', e?.message);
+  }
 }
 
 async function logReport(
@@ -322,6 +395,141 @@ async function logReport(
   });
 }
 
+
+// ── 転送・新規案件フロー支援 ──────────────────────────────────
+
+// ファイル名から資料カテゴリを推定
+function guessFileCategory(fileName: string): string {
+  if (/登記/.test(fileName)) return '登記簿';
+  if (/目録|配当一覧/.test(fileName)) return '物件目録';
+  if (/間取り|図面/.test(fileName)) return '図面・間取り';
+  if (/媒介/.test(fileName)) return '媒介書類';
+  if (/弁護士|債権者/.test(fileName)) return '重要書類';
+  return 'その他';
+}
+
+// ファイル名の住所・法人名から案件を特定（登記簿PDFの自動紐付け）
+async function matchFileNameToProperty(fileName: string, sbUrl: string, sbKey: string): Promise<PropertyRow | null> {
+  const base = fileName.normalize('NFKC');
+  const res = await fetch(
+    `${sbUrl}/rest/v1/properties?select=id,owner_name,address,case_number,status,assignee,notes&order=updated_at.desc&limit=500`,
+    { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` } }
+  );
+  if (!res.ok) return null;
+  const rows: PropertyRow[] = await res.json();
+
+  // 不動産登記: ファイル名先頭の住所でマッチ
+  const m = base.match(/^(.+?)不動産登記/);
+  if (m) {
+    const fa = normalizeAddress(m[1]).replace(/[−－ー]/g, '-');
+    if (fa.length >= 6) {
+      for (const r of rows) {
+        const ra = normalizeAddress(r.address).replace(/番地の?|番(?=\d)/g, '-').replace(/[−－ー]/g, '-');
+        const fb = fa.replace(/番地の?|番(?=\d)/g, '-');
+        if (ra && (ra.startsWith(fb) || fb.startsWith(ra) || (fb.length >= 8 && ra.includes(fb.slice(0, 12))))) return r;
+      }
+    }
+  }
+  // 法人登記簿: 法人名で所有者マッチ
+  const corp = base.match(/^(.+?)法人登記簿/);
+  if (corp) {
+    const cname = corp[1].replace(/[\s　]/g, '');
+    for (const r of rows) {
+      const on = (r.owner_name || '').normalize('NFKC').replace(/[\s　]/g, '');
+      if (cname && on && (on.includes(cname) || cname.includes(on))) return r;
+    }
+  }
+  return null;
+}
+
+// 報告より先に届いた保留画像を案件へ添付
+async function attachPendingImages(contextKey: string, propertyId: string, sbUrl: string, sbKey: string): Promise<number> {
+  const since = new Date(Date.now() - 15 * 60000).toISOString();
+  const res = await fetch(
+    `${sbUrl}/rest/v1/line_pending_images?context_key=eq.${encodeURIComponent(contextKey)}&created_at=gte.${since}&select=id,file_path,file_name,file_size`,
+    { headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` } }
+  );
+  if (!res.ok) return 0;
+  const rows: { id: string; file_path: string; file_name: string; file_size: number | null }[] = await res.json();
+  let attached = 0;
+  for (const r of rows) {
+    const ins = await fetch(`${sbUrl}/rest/v1/case_files`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+      body: JSON.stringify({
+        property_id: propertyId, file_name: r.file_name, file_path: r.file_path,
+        file_type: 'jpeg', file_size: r.file_size, category: '写真',
+      }),
+    });
+    if (ins.ok) {
+      attached++;
+      await fetch(`${sbUrl}/rest/v1/line_pending_images?id=eq.${r.id}`, {
+        method: 'DELETE',
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+      });
+    }
+  }
+  return attached;
+}
+
+// 該当案件が無い報告から新規案件を自動登録（配当転送フロー対応）
+async function registerNewCaseFromReport(
+  parsed: ParsedReport,
+  reporterName: string,
+  assignee: string | null,
+  sbUrl: string,
+  sbKey: string,
+): Promise<PropertyRow | null> {
+  if (!parsed.address) return null;
+  const address = parsed.address.normalize('NFKC');
+  let status = '未訪問';
+  if (parsed.tasha_hata || parsed.visit_result === '対象外') status = '訪問対象外';
+  else if (parsed.visit_result) status = '訪問対象';
+
+  const stamp = new Date().toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' });
+  const notes = parsed.memo ? `${stamp} ${reporterName}: ${parsed.memo}` : null;
+
+  const res = await fetch(`${sbUrl}/rest/v1/properties`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}`,
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify({
+      address,
+      owner_name: parsed.owner_name || '',
+      status, rank: 'C', category: '任意売却',
+      assignee: assignee ?? null,
+      notes,
+    }),
+  });
+  if (!res.ok) return null;
+  const rows: PropertyRow[] = await res.json();
+  const prop = rows[0];
+  if (!prop) return null;
+
+  if (parsed.visit_result || parsed.memo) {
+    await fetch(`${sbUrl}/rest/v1/visits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+      body: JSON.stringify({
+        property_id: prop.id,
+        contact_type: 'LINE報告',
+        summary: parsed.memo ?? null,
+        judgment: parsed.visit_result ? RESULT_JUDGMENT[parsed.visit_result] ?? null : null,
+        next_action: parsed.next_action ?? null,
+        recorded_by: reporterName,
+      }),
+    });
+  }
+  autoGeocode(1).catch(() => {});
+  try {
+    await createNotionCase({ address, ownerName: parsed.owner_name || '', caseNumber: null, haitoDate: null, notes: parsed.memo ?? null });
+  } catch (e: any) {
+    console.error('Notion sync failed:', e?.message);
+  }
+  return prop;
+}
 // 直近バッチの配当日を一括修正
 async function fixRecentBatch(contextKey: string, newDate: string, sbUrl: string, sbKey: string): Promise<number> {
   const ctx = await getStoredContext(contextKey, sbUrl, sbKey);
@@ -612,8 +820,9 @@ export async function POST(req: NextRequest) {
             const prop = candidates[0];
             await applyReportToProperty(prop, parsed, reporterName, reporter.assignee, sbUrl, sbKey);
             await markLastReport(contextKey, prop.id, sbUrl, sbKey);
+            const attached = await attachPendingImages(contextKey, prop.id, sbUrl, sbKey);
             await logReport(groupId, lineUserId, text, parsed, prop.id, 'processed', sbUrl, sbKey);
-            await replyLine(replyToken, `✅ ${prop.owner_name}様（${prop.address}）に記録しました`, token);
+            await replyLine(replyToken, `✅ ${prop.owner_name}様（${prop.address}）に記録しました${attached ? `\n📷 写真${attached}枚も添付しました` : ''}`, token);
             continue;
           }
 
@@ -629,7 +838,22 @@ export async function POST(req: NextRequest) {
             continue;
           }
 
-          // 0件 → 未処理として記録し、アプリの一覧から後で手動紐付けできるようにする
+          // 0件 → 住所が読み取れていれば新規案件として自動登録（配当転送フロー対応）
+          if (parsed.address) {
+            const created = await registerNewCaseFromReport(parsed, reporterName, reporter.assignee, sbUrl, sbKey);
+            if (created) {
+              await markLastReport(contextKey, created.id, sbUrl, sbKey);
+              const attached = await attachPendingImages(contextKey, created.id, sbUrl, sbKey);
+              await logReport(groupId, lineUserId, text, parsed, created.id, 'processed', sbUrl, sbKey);
+              await replyLine(
+                replyToken,
+                `🆕 新規案件として登録しました\n${created.owner_name ? created.owner_name + '\n' : ''}${created.address}${attached ? `\n📷 写真${attached}枚も添付しました` : ''}`,
+                token
+              );
+              continue;
+            }
+          }
+          // 住所も無い → 未処理として記録し、アプリの一覧から後で手動紐付けできるようにする
           await logReport(groupId, lineUserId, text, parsed, null, 'unmatched', sbUrl, sbKey);
           await replyLine(replyToken, '📝 報告を受け取りましたが、該当する案件を特定できませんでした。\nアプリの「未処理報告」から手動で紐付けできます。', token);
           continue;
@@ -681,6 +905,21 @@ export async function POST(req: NextRequest) {
         const properties = await ocrWithClaude(buffer, mimeType);
 
         if (properties.length === 0) {
+          // 現地写真の可能性が高い → 保留バッファに保存し、続く報告で案件が確定したら自動添付する
+          const admin = createAdminClient();
+          const ext = mimeType === 'image/png' ? 'png' : 'jpg';
+          const pendingName = `LINE_${Date.now()}.${ext}`;
+          const pendingPath = `pending/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+          const { error: pe } = await admin.storage.from('case-files').upload(pendingPath, buffer, { contentType: mimeType, upsert: false });
+          if (!pe) {
+            await fetch(`${sbUrl}/rest/v1/line_pending_images`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+              body: JSON.stringify({ context_key: contextKey, file_path: pendingPath, file_name: pendingName, file_size: buffer.length }),
+            });
+            // グループを騒がせないため返信しない（続く報告テキストで自動添付される）
+            continue;
+          }
           await replyLine(replyToken, '物件情報を抽出できませんでした。\n\n📎 資料を案件に添付したい場合は「添付」と送ってください。', token);
           continue;
         }
@@ -784,15 +1023,40 @@ export async function POST(req: NextRequest) {
     if (message.type === 'file') {
       try {
         const ctx = await getStoredContext(contextKey, sbUrl, sbKey);
-        if (!ctx?.propertyId) {
-          await replyLine(replyToken, '📎 資料を添付するには先に「添付」と送って案件を選んでください。', token);
+        const fileName = (message.fileName as string | undefined) ?? `LINE_${Date.now()}.pdf`;
+
+        // ①添付モード（明示指定）
+        if (ctx?.propertyId) {
+          const { buffer, mimeType } = await getLineContent(message.id, token);
+          const ok = await uploadCaseFile(buffer, mimeType || 'application/pdf', fileName, ctx.propertyId, guessFileCategory(fileName));
+          await clearAttachContext(contextKey, sbUrl, sbKey);
+          await replyLine(replyToken, ok ? `✅ ${fileName} を案件の資料に追加しました。` : '⚠️ ファイルの保存に失敗しました。', token);
           continue;
         }
-        const { buffer, mimeType } = await getLineContent(message.id, token);
-        const fileName = (message.fileName as string | undefined) ?? `LINE_${Date.now()}.pdf`;
-        const ok = await uploadCaseFile(buffer, mimeType || 'application/pdf', fileName, ctx.propertyId);
-        await clearAttachContext(contextKey, sbUrl, sbKey);
-        await replyLine(replyToken, ok ? `✅ ${fileName} を案件の資料に追加しました。` : '⚠️ ファイルの保存に失敗しました。', token);
+
+        // ②ファイル名の住所・法人名から案件を自動特定（登記簿PDFの転送に対応）
+        const byName = await matchFileNameToProperty(fileName, sbUrl, sbKey);
+        if (byName) {
+          const { buffer, mimeType } = await getLineContent(message.id, token);
+          const category = guessFileCategory(fileName);
+          const ok = await uploadCaseFile(buffer, mimeType || 'application/pdf', fileName, byName.id, category);
+          await replyLine(replyToken, ok ? `📜 ${byName.owner_name || byName.address}の「${category}」に追加しました` : '⚠️ ファイルの保存に失敗しました。', token);
+          continue;
+        }
+
+        // ③直近15分以内に報告した案件へ自動添付
+        if (ctx?.lastReportPropertyId && ctx.lastReportAt && (Date.now() - ctx.lastReportAt.getTime()) / 60000 <= 15) {
+          const { buffer, mimeType } = await getLineContent(message.id, token);
+          const category = guessFileCategory(fileName);
+          const ok = await uploadCaseFile(buffer, mimeType || 'application/pdf', fileName, ctx.lastReportPropertyId, category);
+          if (ok) {
+            await markLastReport(contextKey, ctx.lastReportPropertyId, sbUrl, sbKey);
+            await replyLine(replyToken, `📜 直前の案件の「${category}」に追加しました`, token);
+            continue;
+          }
+        }
+
+        await replyLine(replyToken, '📎 添付先の案件を特定できませんでした。「添付 氏名や住所」と送って案件を選んでから、もう一度ファイルを送ってください。', token);
       } catch (err: any) {
         console.error('File handler error:', err?.message);
         await replyLine(replyToken, `⚠️ エラー: ${String(err?.message ?? err).slice(0, 100)}`, token);

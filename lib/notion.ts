@@ -42,6 +42,67 @@ async function notionFetch(path: string, body: object): Promise<any> {
   return res.json();
 }
 
+async function notionPatch(path: string, body: object): Promise<any> {
+  const token = process.env.NOTION_TOKEN;
+  const res = await fetch(`https://api.notion.com/v1/${path}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Notion-Version': NOTION_VERSION,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Notion API ${path}: ${res.status} ${(await res.text()).slice(0, 200)}`);
+  return res.json();
+}
+
+interface NotionLineUpdateInput {
+  address: string;
+  caseNumber?: string | null;
+  visitResult?: string | null;
+  memo?: string | null;
+  nextAction?: string | null;
+  reainsNone?: boolean;
+  vacancySuspected?: boolean;
+}
+
+export async function updateNotionCaseFromLine(input: NotionLineUpdateInput): Promise<'updated' | 'not_found' | 'disabled'> {
+  const token = process.env.NOTION_TOKEN;
+  const dbId = process.env.NOTION_CASES_DB_ID;
+  if (!token || !dbId) return 'disabled';
+  const filters: object[] = [];
+  if (input.caseNumber) filters.push({ property: '案件名', title: { contains: input.caseNumber } });
+  const shortAddr = input.address.replace(/^(京都府|大阪府|兵庫県|滋賀県|奈良県)/, '').slice(0, 12);
+  if (shortAddr.length >= 6) filters.push({ property: '所在地', rich_text: { contains: shortAddr } });
+  for (const filter of filters) {
+    const data = await notionFetch(`databases/${dbId}/query`, { filter, page_size: 1 });
+    const page = data.results?.[0];
+    if (!page) continue;
+    const now = new Date().toISOString();
+    const memoParts = [input.memo, input.reainsNone ? 'レインズなし' : null, input.vacancySuspected ? '空き家の可能性' : null].filter(Boolean);
+    const properties: Record<string, unknown> = {
+      'LINE更新日時': { date: { start: now } },
+      '最終訪問日': { date: { start: now.slice(0, 10) } },
+    };
+    if (input.visitResult) properties['訪問ステータス'] = { select: { name: input.visitResult } };
+    if (input.nextAction) properties['次アクション'] = { rich_text: [{ text: { content: input.nextAction.slice(0, 1900) } }] };
+    if (input.vacancySuspected) properties['空き家状態'] = { select: { name: '空き家の可能性' } };
+    await notionPatch(`pages/${page.id}`, { properties });
+    if (memoParts.length) {
+      await notionFetch(`blocks/${page.id}/children`, {
+        children: [{
+          object: 'block',
+          type: 'paragraph',
+          paragraph: { rich_text: [{ text: { content: `LINE報告: ${memoParts.join(' / ').slice(0, 1850)}` } }] },
+        }],
+      });
+    }
+    return 'updated';
+  }
+  return 'not_found';
+}
+
 // 事件番号または所在地で既存ページを検索（二重登録防止）
 async function existsInNotion(dbId: string, caseNumber: string | null | undefined, address: string): Promise<boolean> {
   const filters: object[] = [];
