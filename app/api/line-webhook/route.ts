@@ -186,7 +186,7 @@ async function parseReportWithClaude(text: string): Promise<ParsedReport> {
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const message = await anthropic.messages.create({
-    model: 'claude-opus-4-7',
+    model: 'claude-haiku-4-5',
     max_tokens: 512,
     messages: [{
       role: 'user',
@@ -637,7 +637,7 @@ async function ocrWithClaude(buffer: Buffer, mimeType: string): Promise<Extracte
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const message = await anthropic.messages.create({
-    model: 'claude-opus-4-7',
+    model: 'claude-haiku-4-5',
     max_tokens: 2048,
     messages: [{
       role: 'user',
