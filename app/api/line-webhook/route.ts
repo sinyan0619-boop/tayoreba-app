@@ -182,6 +182,7 @@ function parseReportLocally(text: string): Partial<ParsedReport> {
 
 async function parseReportWithClaude(text: string): Promise<ParsedReport> {
   const local = parseReportLocally(text);
+  try {
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const message = await anthropic.messages.create({
@@ -228,6 +229,11 @@ is_report は、雑談・業務連絡・スタンプへの反応など訪問報�
     };
   } catch {
     return { is_report: Boolean(local.is_report), ...local } as ParsedReport;
+  }
+  } catch (e: any) {
+    // APIクレジット切れ等でClaude解析が失敗しても報告を取りこぼさない（ローカル解析で継続）
+    console.error('Claude parse failed, using local fallback:', e?.message);
+    return { ...local, is_report: Boolean(local.is_report), memo: text } as ParsedReport;
   }
 }
 

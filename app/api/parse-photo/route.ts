@@ -44,7 +44,9 @@ export async function POST(req: NextRequest) {
   const isTable = mode === 'table'
   const client = new Anthropic()
 
-  const message = await client.messages.create({
+  let message
+  try {
+    message = await client.messages.create({
     model: 'claude-opus-4-7',
     max_tokens: isTable ? 4096 : 1024,
     messages: [
@@ -63,6 +65,9 @@ export async function POST(req: NextRequest) {
       },
     ],
   })
+  } catch (e: any) {
+    return NextResponse.json({ error: `AI解析に失敗しました: ${String(e?.message ?? e).slice(0, 300)}` }, { status: 500 })
+  }
 
   try {
     const text = message.content[0].type === 'text' ? message.content[0].text : ''
